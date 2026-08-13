@@ -163,7 +163,39 @@ function removeBlockLines(text, block) {
   return kept.join('\n').replace(/\n{3,}/g, '\n\n');
 }
 
+/**
+ * Remove the stray empty-array line (`[]`) that v0.3.3's broken append
+ * branch glued into a fresh profile: it wrote `[]\n\n- insert:` (the
+ * initProfile template's `[]` followed by the grok block), which is illegal
+ * YAML. Detect a bare `[]` line that is FOLLOWED by other data (i.e. it is
+ * not the whole content) and drop it plus the initProfile template comment
+ * lines directly above it, so the remaining grok block is a clean top-level
+ * array again.
+ */
+function removeStrayEmptyArray(text) {
+  const lines = text.split('\n');
+  const kept = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim() === '[]') {
+      // Look ahead past blank/comment lines for any real data line; only the
+      // stray `[]` backed by later content is the broken form.
+      let j = i + 1;
+      while (j < lines.length && (lines[j].trim() === '' || lines[j].trimStart().startsWith('#'))) j++;
+      if (j < lines.length) {
+        // This `[]` is not the whole file: drop it and the initProfile
+        // template comment block directly above (its leading `#` lines) that
+        // names no grok content.
+        while (kept.length > 0 && kept[kept.length - 1].trimStart().startsWith('#')) kept.pop();
+        continue;
+      }
+    }
+    kept.push(lines[i]);
+  }
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n').replace(/^\n+/, '');
+}
+
 patch = removeEmptyInsertShells(patch);
+patch = removeStrayEmptyArray(patch);
 const grokBlocks = findGrokBlocks(patch);
 if (grokBlocks.length > 0) {
   const current = grokBlocks.filter((b) => b.text.includes("XDG_RUNTIME_DIR || '/tmp'"));
