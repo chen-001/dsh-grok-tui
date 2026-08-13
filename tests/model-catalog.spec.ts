@@ -145,6 +145,48 @@ describe('model catalog with duplicate ids across providers', () => {
     client.transport.close()
   })
 
+  it('honors the MOST RECENT switch when set_model is called repeatedly (no listener stacking)', async () => {
+    // Regression: session/set_model used to pass a FRESH selection object and
+    // reinstall installModelSelection on every switch, stacking `agent/request`
+    // waterfall listeners. The outermost (first-installed) listener kept its
+    // STALE first choice and shadowed every later selection — so a switch
+    // away from the first model silently reverted. This must return to the
+    // first provider after switching away and back.
+    const { harness, adapterB } = await duplicatedCatalogHarness({
+      script: [textResponse('a'), textResponse('b'), textResponse('c'), textResponse('d')],
+    })
+    const adapterA = harness.adapter
+    const client = await AcpTestClient.connect(socketPath, recordingClient(harness))
+    await client.client.initialize({ protocolVersion: 1 })
+    const cwd = await mkdtemp(join(tmpdir(), 'grok-models-stack-'))
+    const created = await client.client.newSession({ cwd, mcpServers: [] })
+
+    // Switch to mock-b, then back to mock (adapter A), then to mock-b again.
+    await client.client.extMethod('session/set_model', {
+      sessionId: String(created.sessionId),
+      modelId: 'mock-b@shared',
+    })
+    await client.client.prompt({ sessionId: created.sessionId, prompt: [{ type: 'text', text: 'p1' }] })
+    await client.client.extMethod('session/set_model', {
+      sessionId: String(created.sessionId),
+      modelId: 'shared',
+    })
+    await client.client.prompt({ sessionId: created.sessionId, prompt: [{ type: 'text', text: 'p2' }] })
+    // The second switch must actually route back to adapter A.
+    expect(adapterA.requests.at(-1)?.provider).toBe('mock')
+    expect(adapterB.requests.length).toBe(1)
+
+    await client.client.extMethod('session/set_model', {
+      sessionId: String(created.sessionId),
+      modelId: 'mock-b@shared',
+    })
+    await client.client.prompt({ sessionId: created.sessionId, prompt: [{ type: 'text', text: 'p3' }] })
+    // And the third switch back to mock-b must take effect too.
+    expect(adapterB.requests.at(-1)?.provider).toBe('mock-b')
+    expect(adapterB.requests.length).toBe(2)
+    client.transport.close()
+  })
+
   it('remembers the route-encoded choice so a new session uses the same provider', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'grok-models-mem-'))
     socketPath = join(dir, 'leader.sock')

@@ -30,7 +30,12 @@ import {
   type SessionNotification,
   type StopReason,
 } from '@agentclientprotocol/sdk'
-import { type Agent, type AgentSetup, installModelSelection } from '@deepseek-ai/dsh-agent'
+import {
+  type Agent,
+  type AgentSetup,
+  installModelSelection,
+  type ModelSelectionRef,
+} from '@deepseek-ai/dsh-agent'
 import { createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import {
   type SessionEvent,
@@ -113,6 +118,17 @@ interface SessionRecord {
   adopted?: boolean
   /** Disposer of the scoped shadow ask_user_question tool (reinstalled after re-align). */
   disposeShadow?: () => void
+  /**
+   * Mutable per-session model selection. `session/set_model` updates
+   * `ref.current` IN PLACE (never reinstalls) so the single
+   * `installModelSelection` listener pair sees the new choice; reinstalling
+   * per switch would stack `agent/request` waterfall listeners and let the
+   * FIRST (outermost) listener's stale choice shadow every later one — which
+   * silently reverts the model the moment the prompt leaves assembly.
+   */
+  modelSelectionRef?: ModelSelectionRef
+  /** Disposer of the single model-selection listener pair (installed lazily). */
+  disposeModelSelection?: () => void
   /** In-flight prompt: its queued message id (the claim-correlation key), the captured turn, and settlement slots. */
   inflight:
     | {
@@ -972,16 +988,26 @@ export function createAcpAgent(
         }
         const resolved = await ctx.llm.resolveCallConfig(route)
         const effort = mapGrokEffort(_meta?.reasoningEffort)
-        installModelSelection(record.agent.ctx, {
-          current: {
-            provider: resolved.provider,
-            model: resolved.model,
-            ...(effort === undefined
-              ? {}
-              : { reasoningEffort: ReasoningEffortId(effort) }),
-          },
-          assembled: undefined,
-        })
+        // Install the listener pair ONCE per record and update the selection
+        // in place. Reinstalling per switch would stack `agent/request`
+        // waterfall listeners; the outermost (first-installed) one then
+        // re-applies its STALE selection over the newer inner result, so the
+        // model would visibly change in the pager but silently revert at
+        // request time.
+        if (record.modelSelectionRef === undefined) {
+          record.modelSelectionRef = { current: undefined, assembled: undefined }
+          record.disposeModelSelection = installModelSelection(
+            record.agent.ctx,
+            record.modelSelectionRef,
+          )
+        }
+        record.modelSelectionRef.current = {
+          provider: resolved.provider,
+          model: resolved.model,
+          ...(effort === undefined
+            ? {}
+            : { reasoningEffort: ReasoningEffortId(effort) }),
+        }
         if (lastModel !== undefined && config.lastModelFile !== undefined) {
           // Persist the ROUTE-ENCODED id so a later session/new routes to the
           // same provider even when the model id exists under several routes.
@@ -1245,6 +1271,7 @@ export function createAcpAgent(
     }
     for (const record of records) {
       record.disposeShadow?.()
+      record.disposeModelSelection?.()
       // Adopted agents are owned by the web host (or another connection);
       // cancelling them would abort a turn the user started elsewhere. The
       // record's OWN inflight (a prompt this connection queued) is still

@@ -1686,16 +1686,20 @@ function createAcpAgent(ctx, config, channel, logger, questions, lastModel) {
                 if (void 0 === route) throw invalidParams(`model not found in any provider catalog: ${modelId}`);
                 const resolved = await ctx.llm.resolveCallConfig(route);
                 const effort = mapGrokEffort(_meta?.reasoningEffort);
-                installModelSelection(record.agent.ctx, {
-                    current: {
-                        provider: resolved.provider,
-                        model: resolved.model,
-                        ...void 0 === effort ? {} : {
-                            reasoningEffort: ReasoningEffortId(effort)
-                        }
-                    },
-                    assembled: void 0
-                });
+                if (void 0 === record.modelSelectionRef) {
+                    record.modelSelectionRef = {
+                        current: void 0,
+                        assembled: void 0
+                    };
+                    record.disposeModelSelection = installModelSelection(record.agent.ctx, record.modelSelectionRef);
+                }
+                record.modelSelectionRef.current = {
+                    provider: resolved.provider,
+                    model: resolved.model,
+                    ...void 0 === effort ? {} : {
+                        reasoningEffort: ReasoningEffortId(effort)
+                    }
+                };
                 if (void 0 !== lastModel && void 0 !== config.lastModelFile) {
                     lastModel.current = `${resolved.provider}${MODEL_ROUTE_SEPARATOR}${resolved.model}`;
                     persistLastModel(config.lastModelFile, lastModel.current);
@@ -1832,6 +1836,7 @@ function createAcpAgent(ctx, config, channel, logger, questions, lastModel) {
         if (void 0 !== questions) for (const record of records)questions.unregister(String(record.agent.session.id));
         for (const record of records){
             record.disposeShadow?.();
+            record.disposeModelSelection?.();
             if (true === record.adopted) {
                 settlePrompt(record, 'cancelled');
                 continue;
