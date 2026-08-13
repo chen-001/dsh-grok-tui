@@ -2,7 +2,7 @@
 # dsh-grok-tui one-line installer — the grok TUI as a pure frontend for
 # DeepSeek Harness (dsh).
 #
-#   curl -fsSL https://raw.githubusercontent.com/dsh-external/dsh-grok-tui/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/chen-001/dsh-grok-tui/main/install.sh | sh
 #
 # Prerequisites (checked, not installed):
 #   - git, Node ^22.19.0 || >=24.0.0, npm (ships with Node)
@@ -72,7 +72,7 @@
 #   DSH_BIN_DIR      directory the `grok-dsh` launcher lands in (default: ~/.local/bin)
 set -eu
 
-GROK_DSH_REPO=${GROK_DSH_REPO:-https://github.com/dsh-external/dsh-grok-tui.git}
+GROK_DSH_REPO=${GROK_DSH_REPO:-https://github.com/chen-001/dsh-grok-tui.git}
 GROK_REF=${GROK_REF:-main}
 DSH_SOURCE=${DSH_SOURCE:-$HOME/.dsh/source}
 DSH_CURRENT=${DSH_CURRENT:-$DSH_SOURCE/current}

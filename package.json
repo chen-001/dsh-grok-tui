@@ -5,7 +5,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/dsh-external/dsh-grok-tui.git"
+    "url": "https://github.com/chen-001/dsh-grok-tui.git"
   },
   "bin": {
     "grok-dsh": "scripts/grok-dsh.sh"

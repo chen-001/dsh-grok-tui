@@ -30,7 +30,7 @@ grok-dsh              # 打开 TUI，直连运行中的 dsh web
 ### 方式 B：git 完整安装 / Full installer
 
 ```sh
-git clone https://github.com/dsh-external/dsh-grok-tui.git
+git clone https://github.com/chen-001/dsh-grok-tui.git
 cd dsh-grok-tui && sh install.sh
 ```
 
