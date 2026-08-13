@@ -183,7 +183,19 @@ if (grokBlocks.length > 0) {
   }
 } else {
   const trimmed = patch.trim();
-  if (trimmed === '' || trimmed === '[]') {
+  // The shipped initProfile template is "3 comment lines + []", NOT the bare
+  // "[]" string this branch used to test — so a fresh user's first setup hit
+  // the append branch and glued the grok block onto the trailing "[]",
+  // producing `[]\n\n- insert:` (illegal YAML: "end of the stream or a
+  // document separator is expected"). Strip comment/blank lines first and
+  // treat any remainder that is empty or the literal empty array `[]` as a
+  // pristine layer to replace wholesale.
+  const dataOnly = trimmed
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l !== '' && !l.startsWith('#'))
+    .join('\n');
+  if (dataOnly === '' || dataOnly === '[]') {
     // The shipped template or an empty layer: replace wholesale.
     patch = `${GROK_SERVER_BLOCK}`;
   } else {
