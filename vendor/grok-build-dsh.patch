@@ -1,0 +1,552 @@
+diff --git a/crates/codegen/xai-grok-pager/src/acp/meta.rs b/crates/codegen/xai-grok-pager/src/acp/meta.rs
+index da2ece8..5fb4d36 100644
+--- a/crates/codegen/xai-grok-pager/src/acp/meta.rs
++++ b/crates/codegen/xai-grok-pager/src/acp/meta.rs
+@@ -6,6 +6,27 @@
+ 
+ use serde::{Deserialize, Serialize};
+ 
++/// Cumulative session usage reported by a DSH harness backend. Stamped as
++/// `_meta.dshUsage` on every notification so the pager can render the dsh
++/// stats the web UI shows (cache-hit share of billed input, input/output
++/// tokens, provider-call count, tool wall time).
++#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
++#[serde(rename_all = "camelCase")]
++pub struct DshUsageMeta {
++    /// Cumulative uncached input tokens across every provider request.
++    pub input_tokens: u64,
++    /// Cumulative output tokens (reasoning included).
++    pub output_tokens: u64,
++    /// Cumulative cache-read tokens.
++    pub cache_read_tokens: u64,
++    /// Cumulative cache-write tokens.
++    pub cache_write_tokens: u64,
++    /// Provider requests: agent-loop steps plus compaction calls.
++    pub api_calls: u64,
++    /// Summed tool wall time (tool/result − tool/call) in milliseconds.
++    pub tool_duration_ms: u64,
++}
++
+ /// Parsed fields from `SessionNotification._meta`.
+ ///
+ /// Extracted once in [`acp_handler`](super::super::app::acp_handler) and passed
+@@ -44,6 +65,9 @@ pub struct NotificationMeta {
+     /// pager keeps a highwater and drops anything `<=` it. `None` when the agent
+     /// didn't stamp an `eventId` (older shell) — such updates always apply.
+     pub event_seq: Option<u64>,
++    /// Cumulative dsh usage (`dshUsage`), when a DSH harness backend serves
++    /// this session. `None` for grok-shell agents and pre-usage sessions.
++    pub dsh_usage: Option<DshUsageMeta>,
+ }
+ 
+ /// Serializable counterpart of the replay stamp the agent injects on
+@@ -124,6 +148,9 @@ impl NotificationMeta {
+             is_replay: m.get("isReplay").and_then(|v| v.as_bool()).unwrap_or(false),
+             event_id,
+             event_seq,
++            dsh_usage: m
++                .get("dshUsage")
++                .and_then(|v| serde_json::from_value::<DshUsageMeta>(v.clone()).ok()),
+         }
+     }
+ }
+@@ -229,5 +256,46 @@ mod tests {
+         assert!(!meta.is_replay);
+         assert_eq!(meta.event_id, None);
+         assert_eq!(meta.event_seq, None);
++        assert_eq!(meta.dsh_usage, None);
++    }
++
++    #[test]
++    fn parse_dsh_usage_meta() {
++        let meta_json = json!({
++            "totalTokens": 42000u64,
++            "dshUsage": {
++                "inputTokens": 1200,
++                "outputTokens": 340,
++                "cacheReadTokens": 9800,
++                "cacheWriteTokens": 200,
++                "apiCalls": 3,
++                "toolDurationMs": 45200,
++            },
++        });
++        let map = meta_json.as_object().unwrap();
++        let meta = NotificationMeta::from_json(Some(map));
++
++        assert_eq!(meta.total_tokens, Some(42000));
++        let usage = meta.dsh_usage.expect("dshUsage parsed");
++        assert_eq!(usage.input_tokens, 1200);
++        assert_eq!(usage.output_tokens, 340);
++        assert_eq!(usage.cache_read_tokens, 9800);
++        assert_eq!(usage.cache_write_tokens, 200);
++        assert_eq!(usage.api_calls, 3);
++        assert_eq!(usage.tool_duration_ms, 45200);
++    }
++
++    #[test]
++    fn parse_missing_or_malformed_dsh_usage() {
++        // Missing key → None.
++        let meta = NotificationMeta::from_json(Some(
++            &json!({ "totalTokens": 5u64 }).as_object().unwrap().clone(),
++        ));
++        assert_eq!(meta.dsh_usage, None);
++        // Malformed body → None (never panics the update path).
++        let bad = json!({ "dshUsage": { "inputTokens": "not-a-number" } });
++        let map = bad.as_object().unwrap();
++        let meta = NotificationMeta::from_json(Some(map));
++        assert_eq!(meta.dsh_usage, None);
+     }
+ }
+diff --git a/crates/codegen/xai-grok-pager/src/app/acp_handler/mod.rs b/crates/codegen/xai-grok-pager/src/app/acp_handler/mod.rs
+index 0174c94..4ec221f 100644
+--- a/crates/codegen/xai-grok-pager/src/app/acp_handler/mod.rs
++++ b/crates/codegen/xai-grok-pager/src/app/acp_handler/mod.rs
+@@ -248,6 +248,9 @@ pub(crate) fn handle(msg: AcpClientMessage, app: &mut AppView) -> bool {
+                         if let Some(tokens) = meta.total_tokens {
+                             confirm_context_used(agent, tokens);
+                         }
++                        if let Some(usage) = meta.dsh_usage.clone() {
++                            agent.apply_dsh_usage(usage);
++                        }
+                         if let Some(ts) = meta.turn_start_ms {
+                             agent.turn_start_ms = Some(ts);
+                             agent.turn_start_ms_prompt = meta.prompt_id.clone();
+diff --git a/crates/codegen/xai-grok-pager/src/app/acp_handler/tests/mod.rs b/crates/codegen/xai-grok-pager/src/app/acp_handler/tests/mod.rs
+index 5d69a92..c075ba6 100644
+--- a/crates/codegen/xai-grok-pager/src/app/acp_handler/tests/mod.rs
++++ b/crates/codegen/xai-grok-pager/src/app/acp_handler/tests/mod.rs
+@@ -703,6 +703,31 @@ pub(super) fn make_token_notification_message(
+         response_tx: tx,
+     })
+ }
++/// `AgentMessageChunk` carrying both `totalTokens` and a cumulative
++/// `dshUsage` snapshot (the DSH harness backend wire shape).
++pub(super) fn make_dsh_usage_notification_message(
++    session_id: &str,
++    total_tokens: u64,
++    usage: serde_json::Value,
++) -> AcpClientMessage {
++    let (tx, _rx) = tokio::sync::oneshot::channel();
++    let request = acp::SessionNotification::new(
++            acp::SessionId::new(session_id),
++            acp::SessionUpdate::AgentMessageChunk(
++                acp::ContentChunk::new(
++                    acp::ContentBlock::Text(acp::TextContent::new("hi")),
++                ),
++            ),
++        )
++        .meta(serde_json::json!({
++                "totalTokens": total_tokens,
++                "dshUsage": usage,
++            }).as_object().cloned());
++    AcpClientMessage::SessionNotification(xai_acp_lib::AcpArgs {
++        request,
++        response_tx: tx,
++    })
++}
+ use crate::scrollback::block::RenderBlock;
+ /// Build an `AgentMessageChunk` notification carrying `text` for `session_id`.
+ pub(super) fn make_agent_chunk_message(
+diff --git a/crates/codegen/xai-grok-pager/src/app/acp_handler/tests/reconnect.rs b/crates/codegen/xai-grok-pager/src/app/acp_handler/tests/reconnect.rs
+index 152d796..5a1ba31 100644
+--- a/crates/codegen/xai-grok-pager/src/app/acp_handler/tests/reconnect.rs
++++ b/crates/codegen/xai-grok-pager/src/app/acp_handler/tests/reconnect.rs
+@@ -19,6 +19,76 @@
+         );
+     }
+ 
++    #[test]
++    fn chat_kind_sessions_accept_remote_context_usage() {
++        // DSH harness sessions resume as chat-kind; the leader reports remote
++        // context usage via `_meta.totalTokens`, so the context bar must
++        // render for them (local sampler data stays suppressed).
++        let mut app = make_app_with_agent("sess-chat");
++        let agent = app.agents.get_mut(&AgentId(0)).unwrap();
++        agent.chat_kind = true;
++        assert!(agent.context_state.is_none());
++
++        let _ = handle(make_token_notification_message("sess-chat", 8_500), &mut app);
++
++        let agent = app.agents.get(&AgentId(0)).unwrap();
++        assert_eq!(
++            agent.context_state.as_ref().map(|c| c.used),
++            Some(8_500),
++            "remote context usage must populate the bar for chat-kind sessions"
++        );
++    }
++
++    #[test]
++    fn handle_applies_dsh_usage_meta() {
++        let mut app = make_app_with_agent("sess-dsh");
++        assert!(app.agents.get(&AgentId(0)).unwrap().dsh_usage.is_none());
++
++        let _ = handle(
++            make_dsh_usage_notification_message(
++                "sess-dsh",
++                42_000,
++                serde_json::json!({
++                    "inputTokens": 1200,
++                    "outputTokens": 340,
++                    "cacheReadTokens": 9800,
++                    "cacheWriteTokens": 200,
++                    "apiCalls": 3,
++                    "toolDurationMs": 45_200,
++                }),
++            ),
++            &mut app,
++        );
++
++        let agent = app.agents.get(&AgentId(0)).unwrap();
++        assert_eq!(agent.context_state.as_ref().map(|c| c.used), Some(42_000));
++        let usage = agent.dsh_usage.as_ref().expect("dshUsage applied");
++        assert_eq!(usage.input_tokens, 1200);
++        assert_eq!(usage.output_tokens, 340);
++        assert_eq!(usage.cache_read_tokens, 9800);
++        assert_eq!(usage.cache_write_tokens, 200);
++        assert_eq!(usage.api_calls, 3);
++        assert_eq!(usage.tool_duration_ms, 45_200);
++    }
++
++    #[test]
++    fn handle_ignores_malformed_dsh_usage() {
++        let mut app = make_app_with_agent("sess-bad");
++        let _ = handle(
++            make_dsh_usage_notification_message(
++                "sess-bad",
++                1,
++                serde_json::json!({ "inputTokens": "not-a-number" }),
++            ),
++            &mut app,
++        );
++        let agent = app.agents.get(&AgentId(0)).unwrap();
++        assert_eq!(
++            agent.dsh_usage, None,
++            "a malformed dshUsage body must never crash the update path"
++        );
++    }
++
+     #[test]
+     fn handle_routes_tokens_to_root_when_session_id_not_yet_set() {
+         // Regression: a notification racing ahead of TaskResult::SessionCreated
+diff --git a/crates/codegen/xai-grok-pager/src/app/agent_view/mod.rs b/crates/codegen/xai-grok-pager/src/app/agent_view/mod.rs
+index 065e2d2..8c08664 100644
+--- a/crates/codegen/xai-grok-pager/src/app/agent_view/mod.rs
++++ b/crates/codegen/xai-grok-pager/src/app/agent_view/mod.rs
+@@ -871,6 +871,10 @@ pub struct AgentView {
+     pub(crate) modal_hovered_key: Option<char>,
+     /// Cached server-reported context state.
+     pub context_state: Option<xai_grok_shell::session::ContextInfo>,
++    /// Cumulative dsh usage stats reported by a DSH harness backend
++    /// (`_meta.dshUsage`), rendered as the dsh status-bar item. `None` for
++    /// grok-shell agents and before the first provider call.
++    pub dsh_usage: Option<crate::acp::meta::DshUsageMeta>,
+     /// Gateway light-frontend session (`kind: "chat"` / `--chat` / conversation
+     /// resume). Suppresses Build credits / local sampler context telemetry so the
+     /// status bar and prompt never imply remote usage from wrong metrics.
+diff --git a/crates/codegen/xai-grok-pager/src/app/agent_view/render.rs b/crates/codegen/xai-grok-pager/src/app/agent_view/render.rs
+index ca45333..49c3d8e 100644
+--- a/crates/codegen/xai-grok-pager/src/app/agent_view/render.rs
++++ b/crates/codegen/xai-grok-pager/src/app/agent_view/render.rs
+@@ -1368,15 +1368,27 @@ impl AgentView {
+             .as_ref()
+             .and_then(|c| (c.total > 0).then_some(c.total))
+             .or(model_window);
++        // A chat-kind session's context bar is remote-owned: it renders only
++        // when the leader reports usage (`context_state` comes solely from
++        // `_meta.totalTokens` for chat-kind — `apply_full_context_info` stays
++        // suppressed there), so the remote totals gate the bar instead of the
++        // chat-kind flag.
++        let gateway_chat = self.chat_kind && ctx_used.is_none();
+         if let Some(ctx_line) = context_bar::context_bar_line_for_session(
+             ctx_used,
+             ctx_total,
+             self.hit_context.hovered,
+             &theme,
+-            self.chat_kind,
++            gateway_chat,
+         ) {
+             status.push("context", ctx_line);
+         }
++        if let Some(usage) = self.dsh_usage.as_ref() {
++            status.push(
++                "dsh_usage",
++                crate::views::agent_status::dsh_usage_status_line(usage, &theme),
++            );
++        }
+         let running = self.session.current_prompt_id.as_deref();
+         let queue_len = self.session.queue_len()
+             + self
+diff --git a/crates/codegen/xai-grok-pager/src/app/agent_view/session.rs b/crates/codegen/xai-grok-pager/src/app/agent_view/session.rs
+index b94d541..2b843c0 100644
+--- a/crates/codegen/xai-grok-pager/src/app/agent_view/session.rs
++++ b/crates/codegen/xai-grok-pager/src/app/agent_view/session.rs
+@@ -115,6 +115,7 @@ impl AgentView {
+             modal_buttons: Vec::new(),
+             modal_hovered_key: None,
+             context_state: None,
++            dsh_usage: None,
+             chat_kind: false,
+             app_chat_mode: false,
+             #[cfg(feature = "local-workspace")]
+@@ -843,13 +844,11 @@ impl AgentView {
+     /// Update context state from a streaming notification carrying only
+     /// `used` and `total` fields.
+     ///
+-    /// No-op for gateway/chat-kind sessions (same policy as
+-    /// [`Self::apply_full_context_info`]).
++    /// Unlike [`Self::apply_full_context_info`], chat-kind sessions DO accept
++    /// this: the values arrive on `_meta.totalTokens` from the leader (the
++    /// DSH harness backend reports remote context usage), so the context bar
++    /// renders for chat-kind sessions that own remote context reporting.
+     pub fn apply_context_used(&mut self, used: u64, total: u64) {
+-        if self.chat_kind {
+-            self.context_state = None;
+-            return;
+-        }
+         let total = if total > 0 {
+             total
+         } else {
+@@ -871,6 +870,10 @@ impl AgentView {
+             }
+         }
+     }
++    /// Update the cumulative dsh usage stats from `_meta.dshUsage`.
++    pub fn apply_dsh_usage(&mut self, usage: crate::acp::meta::DshUsageMeta) {
++        self.dsh_usage = Some(usage);
++    }
+     /// Apply Build coding-credit balance only for non-chat agents.
+     /// Gateway/chat-kind sessions keep credits unset so bars/warnings stay off.
+     pub fn apply_credit_balance(
+diff --git a/crates/codegen/xai-grok-pager/src/app/dispatch/session/load.rs b/crates/codegen/xai-grok-pager/src/app/dispatch/session/load.rs
+index 19db470..fad9fad 100644
+--- a/crates/codegen/xai-grok-pager/src/app/dispatch/session/load.rs
++++ b/crates/codegen/xai-grok-pager/src/app/dispatch/session/load.rs
+@@ -384,7 +384,14 @@ pub(in crate::app::dispatch) fn dispatch_pick_session(
+         }
+     }
+     if chat_kind {
+-        return dispatch_load_session(app, session_id, None, true);
++        // The catalog entry carries the session's real working directory
++        // (DSH-backed entries always do; a pure conversation entry may be
++        // empty). Resume there instead of staying in the pager's launch
++        // directory, so the prompt path / git branch / file search follow
++        // the session. Empty cwd keeps the previous launch-directory
++        // behavior.
++        let resume_cwd = (!cwd.is_empty()).then(|| std::path::PathBuf::from(&cwd));
++        return dispatch_load_session(app, session_id, resume_cwd, true);
+     }
+     let local_cwd = app.cwd.to_string_lossy().to_string();
+     if xai_grok_shell::session::resolve_local_session(&session_id, &local_cwd).is_some() {
+@@ -867,7 +874,14 @@ pub(in crate::app::dispatch) fn dispatch_pick_content_session(
+     app.session_picker_content_loading = false;
+     invalidate_picker_fetch_on_dismiss(app);
+     if chat_kind {
+-        return dispatch_load_session(app, session_id, None, true);
++        // The catalog entry carries the session's real working directory
++        // (DSH-backed entries always do; a pure conversation entry may be
++        // empty). Resume there instead of staying in the pager's launch
++        // directory, so the prompt path / git branch / file search follow
++        // the session. Empty cwd keeps the previous launch-directory
++        // behavior.
++        let resume_cwd = (!cwd.is_empty()).then(|| std::path::PathBuf::from(&cwd));
++        return dispatch_load_session(app, session_id, resume_cwd, true);
+     }
+     let local_cwd = app.cwd.to_string_lossy().to_string();
+     if xai_grok_shell::session::resolve_local_session(&session_id, &local_cwd).is_some() {
+diff --git a/crates/codegen/xai-grok-pager/src/app/dispatch/tests/session/load.rs b/crates/codegen/xai-grok-pager/src/app/dispatch/tests/session/load.rs
+index 3179210..41f13c1 100644
+--- a/crates/codegen/xai-grok-pager/src/app/dispatch/tests/session/load.rs
++++ b/crates/codegen/xai-grok-pager/src/app/dispatch/tests/session/load.rs
+@@ -2386,3 +2386,60 @@ fn plain_picker_fetch_carries_no_query_and_bumps_seq() {
+         "picker fetch must be unfiltered and supersede the search, got {effects:?}"
+     );
+ }
++
++/// A conversation entry (the DSH-backed kind) carries the session's real
++/// working directory; picking it must resume with that cwd so the prompt
++/// path / git branch / file search follow the session instead of staying
++/// in the pager's launch directory.
++#[test]
++fn conversation_pick_resumes_with_entry_cwd() {
++    let mut app = test_app();
++    app.cwd = std::path::PathBuf::from("/launch/dir");
++    app.session_picker_entries = Some(vec![make_conversation_entry("conv-cwd")]);
++    app.session_picker_entries
++        .as_mut()
++        .unwrap()
++        .iter_mut()
++        .for_each(|e| e.cwd = "/repo/session-a".into());
++
++    let effects = dispatch(Action::PickSession(0), &mut app);
++    let agent = &app.agents[&AgentId(0)];
++    assert_eq!(
++        agent.session.cwd,
++        std::path::PathBuf::from("/repo/session-a"),
++        "conversation resume must adopt the entry cwd"
++    );
++    assert!(
++        effects
++            .iter()
++            .any(|e| matches!(e, Effect::LoadSession { session_cwd: Some(c), .. } if c == &std::path::PathBuf::from("/repo/session-a"))),
++        "LoadSession effect must carry the entry cwd, got {effects:?}"
++    );
++}
++
++/// A conversation entry with an empty cwd (a pure chat conversation) keeps
++/// the previous behavior: resume in the pager's launch directory.
++#[test]
++fn conversation_pick_with_empty_cwd_keeps_launch_dir() {
++    let mut app = test_app();
++    app.cwd = std::path::PathBuf::from("/launch/dir");
++    app.session_picker_entries = Some(vec![make_conversation_entry("conv-empty")]);
++
++    let effects = dispatch(Action::PickSession(0), &mut app);
++    let agent = &app.agents[&AgentId(0)];
++    assert_eq!(
++        agent.session.cwd,
++        std::path::PathBuf::from("/launch/dir"),
++        "empty entry cwd must fall back to the launch directory"
++    );
++    assert!(
++        effects.iter().any(|e| matches!(
++            e,
++            Effect::LoadSession {
++                session_cwd: None,
++                ..
++            }
++        )),
++        "LoadSession effect must carry no cwd for an empty entry"
++    );
++}
+diff --git a/crates/codegen/xai-grok-pager/src/views/agent_status.rs b/crates/codegen/xai-grok-pager/src/views/agent_status.rs
+index 7fc9318..3364f63 100644
+--- a/crates/codegen/xai-grok-pager/src/views/agent_status.rs
++++ b/crates/codegen/xai-grok-pager/src/views/agent_status.rs
+@@ -23,6 +23,7 @@ use ratatui::text::{Line, Span};
+ 
+ use super::context_bar::SEPARATOR;
+ use super::turn_status::SPINNER_DIVISOR;
++use crate::acp::meta::DshUsageMeta;
+ use crate::app::agent::{GoalDisplayPhase, GoalDisplayState, GoalDisplayStatus};
+ use crate::app::agent_view::McpInitProgress;
+ use crate::theme::Theme;
+@@ -325,6 +326,59 @@ pub fn mcp_status_line(
+     ]))
+ }
+ 
++// ---------------------------------------------------------------------------
++// DSH usage status line
++// ---------------------------------------------------------------------------
++
++/// Format elapsed milliseconds compactly: `45.2s` under a minute, `2m42s`
++/// from there on (mirrors the web UI's duration display).
++fn format_duration_ms(ms: u64) -> String {
++    let s = ms as f64 / 1_000.0;
++    if s < 60.0 {
++        format!("{:.1}s", s)
++    } else {
++        let whole = (s.round()) as u64;
++        format!("{}m{}s", whole / 60, whole % 60)
++    }
++}
++
++/// Cache-hit share of billed input (`cacheRead / (uncached + read + write)`),
++/// matching the web UI's `Cache hit` figure. `None` when nothing was billed.
++fn cache_hit_percent(usage: &DshUsageMeta) -> Option<u64> {
++    let billed = usage.input_tokens + usage.cache_read_tokens + usage.cache_write_tokens;
++    (billed > 0).then(|| usage.cache_read_tokens * 100 / billed)
++}
++
++/// Build the dsh usage status-bar item: cumulative session stats reported by
++/// the DSH harness backend.
++///
++/// Format: `Cache 87% · In 12K · Out 3.2K · API 8 · Tools 45s` — the same
++/// figures the web UI shows per session (cache-hit share, input/output
++/// tokens, provider-call count, tool wall time). The context bar renders the
++/// occupancy separately from `_meta.totalTokens` / model window.
++pub fn dsh_usage_status_line(usage: &DshUsageMeta, theme: &Theme) -> Line<'static> {
++    let style = Style::default().fg(theme.text_secondary).bg(theme.bg_base);
++    let mut parts: Vec<String> = Vec::new();
++    if let Some(cache) = cache_hit_percent(usage) {
++        parts.push(format!("Cache {cache}%"));
++    }
++    if usage.input_tokens > 0 || usage.output_tokens > 0 {
++        parts.push(format!(
++            "In {} · Out {}",
++            super::context_bar::fmt_tokens(usage.input_tokens),
++            super::context_bar::fmt_tokens(usage.output_tokens),
++        ));
++    }
++    parts.push(format!("API {}", usage.api_calls));
++    if usage.tool_duration_ms > 0 {
++        parts.push(format!(
++            "Tools {}",
++            format_duration_ms(usage.tool_duration_ms)
++        ));
++    }
++    Line::from(Span::styled(parts.join(" · "), style))
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+@@ -860,6 +914,59 @@ mod tests {
+         assert!(mcp_status_line(&progress, 0, &t).is_none());
+     }
+ 
++    #[test]
++    fn dsh_usage_line_renders_all_groups() {
++        let usage = DshUsageMeta {
++            input_tokens: 1200,
++            output_tokens: 340,
++            cache_read_tokens: 9800,
++            cache_write_tokens: 200,
++            api_calls: 8,
++            tool_duration_ms: 45200,
++        };
++        let t = Theme::current();
++        let line = dsh_usage_status_line(&usage, &t);
++        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
++        // 9800 / (1200 + 9800 + 200) = 87.5% → 87%.
++        assert_eq!(
++            text, "Cache 87% · In 1.2K · Out 340 · API 8 · Tools 45.2s",
++            "full dsh usage line"
++        );
++    }
++
++    #[test]
++    fn dsh_usage_line_drops_empty_groups() {
++        let t = Theme::current();
++        let line = dsh_usage_status_line(&DshUsageMeta::default(), &t);
++        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
++        // Nothing billed yet: only the API count survives.
++        assert_eq!(text, "API 0", "default usage renders just the call count");
++    }
++
++    #[test]
++    fn dsh_usage_line_zero_cache_share() {
++        let usage = DshUsageMeta {
++            input_tokens: 100,
++            output_tokens: 10,
++            cache_read_tokens: 0,
++            cache_write_tokens: 0,
++            api_calls: 1,
++            tool_duration_ms: 0,
++        };
++        let t = Theme::current();
++        let line = dsh_usage_status_line(&usage, &t);
++        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
++        assert_eq!(text, "Cache 0% · In 100 · Out 10 · API 1");
++    }
++
++    #[test]
++    fn dsh_duration_formatting() {
++        assert_eq!(format_duration_ms(0), "0.0s");
++        assert_eq!(format_duration_ms(45200), "45.2s");
++        assert_eq!(format_duration_ms(162_000), "2m42s");
++        assert_eq!(format_duration_ms(3_600_000), "60m0s");
++    }
++
+     /// Separators appear only *between* items — never before the first item or
+     /// after the last (no leading/trailing divider).
+     #[test]

@@ -1,0 +1,29 @@
+# Local
+.DS_Store
+*.local
+*.log*
+tsconfig.json
+node_modules/
+
+# Local runtime state (never publish)
+.sessions/
+
+# Build artifacts (dist/ is COMMITTED: git-based installs — npm install
+# github:dsh-external/dsh-grok-tui — need the built entry without running
+# the local toolchain)
+*.tsbuildinfo
+*.tgz
+storybook-static
+doc_build/
+
+# npm installs in an installed checkout create this; pnpm-lock.yaml is the lock of record
+package-lock.json
+
+# Internal milestone reports (not part of the published repo)
+M1-REPORT.md
+M5-REPORT.md
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+.idea

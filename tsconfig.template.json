@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist/types",
+    "noEmit": true
+  },
+  "include": ["src"],
+  "dshReferences": [
+    "vendor/cordis",
+    "vendor/schemastery",
+    "packages/core/agent",
+    "packages/core/agent-loop",
+    "packages/core/session",
+    "packages/llm/llm",
+    "packages/interaction/commands",
+    "packages/interaction/user-approval",
+    "packages/interaction/user-questions",
+    "packages/host/apiproxy",
+    "packages/session/session-persistence",
+    "packages/test-support/agent-loop-testkit",
+    "packages/runtime-diagnostics/invariants"
+  ]
+}

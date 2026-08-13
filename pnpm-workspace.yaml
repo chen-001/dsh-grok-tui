@@ -1,0 +1,4 @@
+# Standalone project: research/ is not part of the parent DSH workspace, so
+# this project pins its own workspace root (no members) to get a local
+# node_modules instead of hoisting into the parent repo's store.
+packages: []

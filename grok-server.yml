@@ -1,0 +1,55 @@
+# grok-server bridge patch for the OFFICIAL dsh host (`dsh web`).
+#
+# Applying this layer makes the grok TUI a peer client of the web host: the
+# plugin listens on the grok leader socket inside the SAME process that owns
+# ctx.sessions / ctx.agents / the session store, so browser tabs and grok
+# windows share one live agent per session and one seq counter — interleaved
+# session logs (the old two-daemon architecture's seq gaps) become
+# structurally impossible.
+#
+# Two mounting paths (both need the package resolvable from the profile; see
+# install.sh, which symlinks it into $DSH_HOME/profiles/web/node_modules):
+#   1. install.sh writes this insert into ~/.dsh/profiles/web/cordis.patch.yml
+#      (idempotent), so `dsh web` carries the bridge with no extra flags.
+#   2. Temporary load: `dsh web --patch research/dsh-grok-tui/grok-server.yml`.
+#
+# Config notes:
+#   - provider/model/effort match the standalone daemon defaults; the model
+#     picker in the TUI can still switch per session, and the pager's last
+#     choice persists to $DSH_HOME/grok-last-model.
+#   - persistenceRoot/storageRoot point at the host's own shared store so the
+#     resume catalog, the web-sidebar attach, and the legacy-log health watch
+#     operate on the same files the web host reads.
+#   - webPort is deliberately unset: inside the host the plugin attaches
+#     sessions through the in-process workspace service instead of the HTTP
+#     gateway (no port coupling; `dsh web --port` stays free).
+#   - userInteractionProvider: false — the host's api-proxy owns the single
+#     user-interaction provider slot (its browser question dialog); a second
+#     registration fails the whole plugin tree with DUPLICATE_PROVIDER. Until
+#     the scoped shadow ask tool lands (phase 1), grok questions fall through
+#     to the web dialog. The standalone daemon defaults to true.
+#   - socketPath deliberately avoids the official grok CLI's leader path
+#     (~/.grok/leader.sock): a standalone original grok TUI spawns its own
+#     leader process there, and the grok-dsh host probe must never mistake
+#     that foreign leader for this bridge. It also stays out of the DSH home:
+#     dsh's chokidar watchers crash on unix sockets on macOS (fs.watch
+#     UNKNOWN errno -102), and on Linux $XDG_RUNTIME_DIR (private, 0700) is
+#     the correct home for a per-user socket. Keep this expression identical
+#     to the one in scripts/install-profile.mjs so both mounting paths
+#     listen on the same socket.
+- insert:
+    - id: grok-server
+      name: dsh-grok-tui
+      config:
+        socketPath: !!js (process.env.XDG_RUNTIME_DIR || '/tmp') + '/grok-leader.sock'
+        provider: deepseek-official
+        model: !!js process.env.DSH_GROK_MODEL ?? 'deepseek-v4-pro'
+        effort: !!js process.env.DSH_GROK_EFFORT ?? 'max'
+        lastModelFile: !!js dshHomePath('grok-last-model')
+        persistenceRoot: !!js dshHomePath('sessions')
+        storageRoot: !!js dshHomePath('storages')
+        userInteractionProvider: false
+        # Single-process host cannot interleave logs; scanning the shared
+        # store every 15s stacks concurrent passes (zstd thread pool) into
+        # multi-core saturation that freezes prompts — see src/index.ts.
+        healthWatch: false

@@ -1,0 +1,59 @@
+{
+  "name": "dsh-grok-tui",
+  "version": "0.3.3",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dsh-external/dsh-grok-tui.git"
+  },
+  "bin": {
+    "grok-dsh": "scripts/grok-dsh.sh"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "scripts",
+    "vendor"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "scripts": {
+    "build": "node ./scripts/generate-tsconfig.mjs --if-env && rslib",
+    "check": "biome check --write",
+    "dev": "rslib --watch",
+    "format": "biome format --write",
+    "postinstall": "sh scripts/postinstall.sh || true",
+    "test": "rstest",
+    "test:watch": "rstest --watch"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "0.25.1",
+    "schemastery": "^3.18.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-agent": ">=0.1.0-rc.0",
+    "@deepseek-ai/dsh-llm": ">=0.1.0-rc.0",
+    "@deepseek-ai/dsh-session": ">=0.1.0-rc.0",
+    "@deepseek-ai/dsh-tools": ">=0.1.0-rc.0",
+    "@deepseek-ai/dsh-user-questions": ">=0.1.0-rc.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.6",
+    "@rslib/core": "^0.23.2",
+    "@rstest/adapter-rslib": "^0.11.5",
+    "@rstest/core": "^0.11.5",
+    "@types/node": "^26.1.2",
+    "typescript": "^6.0.3"
+  }
+}
