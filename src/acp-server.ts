@@ -1479,16 +1479,33 @@ async function modelState(
   let selected = ''
   const rememberedModel = remembered
   if (rememberedModel !== undefined) {
+    // The remembered id is ROUTE-ENCODED (`provider@model`) whenever it was
+    // saved by session/set_model, but `models` only carries that form for
+    // models that are DUPLICATED across providers — a unique model's row keeps
+    // its bare id. Matching the raw encoded string against the bare id misses
+    // the unique-model case and silently falls through to the default, which
+    // is why a switch to a non-duplicated model never persisted across a
+    // reopen. Decode the bare id first and match that; keep the encoded form
+    // only when the model is genuinely duplicated (its row IS encoded).
+    const at = rememberedModel.indexOf(MODEL_ROUTE_SEPARATOR)
+    const bare = at > 0 ? rememberedModel.slice(at + 1) : rememberedModel
     if (models.some(m => m.modelId === rememberedModel)) {
       selected = rememberedModel
-    } else if ((occurrences.get(rememberedModel) ?? 0) > 1) {
-      const preferred = config.provider ?? rows.find(r => r.modelId === rememberedModel)?.provider
-      const encoded = `${preferred ?? ''}${MODEL_ROUTE_SEPARATOR}${rememberedModel}`
+    } else if (models.some(m => m.modelId === bare)) {
+      // The bare id exists (non-duplicated model): advertise the bare id so
+      // the pager's id-keyed map resolves it.
+      selected = bare
+    } else if ((occurrences.get(bare) ?? 0) > 1) {
+      // Bare id exists under several routes but no row matched the raw encoded
+      // string (e.g. the remembered provider is not registered here): resolve
+      // to the config provider's copy.
+      const preferred = config.provider ?? rows.find(r => r.modelId === bare)?.provider
+      const encoded = `${preferred ?? ''}${MODEL_ROUTE_SEPARATOR}${bare}`
       selected = models.some(m => m.modelId === encoded)
         ? encoded
         : (models[0]?.modelId ?? 'deepseek-v4-flash')
     } else {
-      // Plain id that is not in the catalog anymore (model removed): fall
+      // The id is gone from the catalog entirely (model removed): fall
       // through to the configured default below.
       selected = ''
     }

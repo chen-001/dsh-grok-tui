@@ -293,6 +293,37 @@ describe('model catalog with duplicate ids across providers', () => {
     client.transport.close()
   })
 
+  it('advertises a NON-duplicated remembered model instead of falling back to the default', async () => {
+    // Regression: session/set_model persists the choice ROUTE-ENCODED
+    // (`provider@model`) unconditionally, but a unique model's catalog row
+    // keeps its BARE id. The remembered-id matcher used to compare the raw
+    // encoded string against the bare id, miss it, and silently fall through
+    // to the configured default — so switching to a unique model never
+    // survived a reopen. A unique model must round-trip back to its bare id.
+    const dir = await mkdtemp(join(tmpdir(), 'grok-models-unique-'))
+    socketPath = join(dir, 'leader.sock')
+    const lastModelFile = join(dir, 'last-model')
+    // The pager last picked `only-a` (unique to the 'mock' provider), saved
+    // encoded as `mock@only-a`.
+    await writeFile(lastModelFile, 'mock@only-a', 'utf8')
+    const harness = await makeGrokHarness({
+      socketPath,
+      model: 'shared',
+      models: ['shared', 'only-a'],
+      lastModelFile,
+      script: [],
+    })
+    dispose = harness.dispose
+    const adapterB = new MockAdapter([], ['shared', 'only-b'], undefined, 'mock-b')
+    harness.ctx.llm.registerAdapter(['mock-b'], adapterB)
+
+    const client = await AcpTestClient.connect(socketPath, recordingClient(harness))
+    const init = await client.client.initialize({ protocolVersion: 1 })
+    const state = (init._meta as { modelState?: ModelState }).modelState ?? {}
+    expect(state.currentModelId).toBe('only-a')
+    client.transport.close()
+  })
+
   it('set_model writes the shared agentDefaultModel so the web host follows the switch', async () => {
     // Official-host mode: the web api-proxy holds the SAME agent (grok adopted
     // it) and its installModelSelection reads `agentDefaultModel` — registered

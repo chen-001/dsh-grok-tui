@@ -1917,12 +1917,17 @@ async function modelState(ctx, config, remembered) {
     });
     let selected = '';
     const rememberedModel = remembered;
-    if (void 0 !== rememberedModel) if (models.some((m)=>m.modelId === rememberedModel)) selected = rememberedModel;
-    else if ((occurrences.get(rememberedModel) ?? 0) > 1) {
-        const preferred = config.provider ?? rows.find((r)=>r.modelId === rememberedModel)?.provider;
-        const encoded = `${preferred ?? ''}${MODEL_ROUTE_SEPARATOR}${rememberedModel}`;
-        selected = models.some((m)=>m.modelId === encoded) ? encoded : models[0]?.modelId ?? 'deepseek-v4-flash';
-    } else selected = '';
+    if (void 0 !== rememberedModel) {
+        const at = rememberedModel.indexOf(MODEL_ROUTE_SEPARATOR);
+        const bare = at > 0 ? rememberedModel.slice(at + 1) : rememberedModel;
+        if (models.some((m)=>m.modelId === rememberedModel)) selected = rememberedModel;
+        else if (models.some((m)=>m.modelId === bare)) selected = bare;
+        else if ((occurrences.get(bare) ?? 0) > 1) {
+            const preferred = config.provider ?? rows.find((r)=>r.modelId === bare)?.provider;
+            const encoded = `${preferred ?? ''}${MODEL_ROUTE_SEPARATOR}${bare}`;
+            selected = models.some((m)=>m.modelId === encoded) ? encoded : models[0]?.modelId ?? 'deepseek-v4-flash';
+        } else selected = '';
+    }
     if ('' === selected) {
         const target = config.model ?? models[0]?.modelId ?? 'deepseek-v4-flash';
         const duplicatedTarget = (occurrences.get(target) ?? 0) > 1;
