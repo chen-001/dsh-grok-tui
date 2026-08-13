@@ -292,4 +292,43 @@ describe('model catalog with duplicate ids across providers', () => {
     expect(state.currentModelId).toBe('mock@shared')
     client.transport.close()
   })
+
+  it('set_model writes the shared agentDefaultModel so the web host follows the switch', async () => {
+    // Official-host mode: the web api-proxy holds the SAME agent (grok adopted
+    // it) and its installModelSelection reads `agentDefaultModel` — registered
+    // earlier, so it is the OUTERMOST waterfall layer and would shadow grok's
+    // own selection. set_model must therefore also saveSelection on that
+    // shared service, or the switch shows in the pager but never reaches the
+    // request. Spy on the service and assert the write.
+    const dir = await mkdtemp(join(tmpdir(), 'grok-savemodel-'))
+    socketPath = join(dir, 'leader.sock')
+    const harness = await makeGrokHarness({
+      socketPath,
+      model: 'shared',
+      models: ['shared', 'only-a'],
+      script: [textResponse('ok')],
+    })
+    dispose = harness.dispose
+
+    const saved: Array<{ provider: string; model: string }> = []
+    harness.ctx.provide('agentDefaultModel', {
+      saveSelection: async (next: { provider: string; model: string }) => {
+        saved.push(next)
+      },
+    })
+
+    const client = await AcpTestClient.connect(socketPath, recordingClient(harness))
+    await client.client.initialize({ protocolVersion: 1 })
+    const cwd = await mkdtemp(join(tmpdir(), 'grok-savemodel-cwd-'))
+    const created = await client.client.newSession({ cwd, mcpServers: [] })
+
+    await client.client.extMethod('session/set_model', {
+      sessionId: String(created.sessionId),
+      modelId: 'shared',
+    })
+
+    expect(saved.length).toBe(1)
+    expect(saved[0]).toMatchObject({ provider: 'mock', model: 'shared' })
+    client.transport.close()
+  })
 })

@@ -1693,13 +1693,20 @@ function createAcpAgent(ctx, config, channel, logger, questions, lastModel) {
                     };
                     record.disposeModelSelection = installModelSelection(record.agent.ctx, record.modelSelectionRef);
                 }
-                record.modelSelectionRef.current = {
+                const selection = {
                     provider: resolved.provider,
                     model: resolved.model,
                     ...void 0 === effort ? {} : {
                         reasoningEffort: ReasoningEffortId(effort)
                     }
                 };
+                record.modelSelectionRef.current = selection;
+                const defaultModel = ctx.get('agentDefaultModel');
+                if (void 0 !== defaultModel) try {
+                    await defaultModel.saveSelection(selection);
+                } catch (error) {
+                    logger.warn(`grok-server: set_model wrote the session selection but not the shared default: ${String(error)}`);
+                }
                 if (void 0 !== lastModel && void 0 !== config.lastModelFile) {
                     lastModel.current = `${resolved.provider}${MODEL_ROUTE_SEPARATOR}${resolved.model}`;
                     persistLastModel(config.lastModelFile, lastModel.current);

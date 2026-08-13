@@ -1001,12 +1001,36 @@ export function createAcpAgent(
             record.modelSelectionRef,
           )
         }
-        record.modelSelectionRef.current = {
+        const selection = {
           provider: resolved.provider,
           model: resolved.model,
           ...(effort === undefined
             ? {}
             : { reasoningEffort: ReasoningEffortId(effort) }),
+        }
+        record.modelSelectionRef.current = selection
+        // Official-host mode: the web api-proxy holds the SAME agent (grok
+        // adopted it) and has installed its OWN installModelSelection with a
+        // `current` getter that reads the shared `agentDefaultModel` service
+        // (or the session request header) — its listener was registered first,
+        // so it is the OUTERMOST waterfall layer and would re-apply the stale
+        // shared model over this grok-side selection. Write the switch through
+        // `agentDefaultModel.saveSelection` too, so the web side (and any other
+        // frontend that reads the shared default) follows the switch instead of
+        // shadowing it. Standalone daemons have no such service; `ctx.get`
+        // returns undefined there and the write is skipped (the daemon owns its
+        // only frontend and uses `record.modelSelectionRef` above directly).
+        const defaultModel = ctx.get('agentDefaultModel') as
+          | { saveSelection(next: typeof selection): Promise<void> }
+          | undefined
+        if (defaultModel !== undefined) {
+          try {
+            await defaultModel.saveSelection(selection)
+          } catch (error) {
+            logger.warn(
+              `grok-server: set_model wrote the session selection but not the shared default: ${String(error)}`,
+            )
+          }
         }
         if (lastModel !== undefined && config.lastModelFile !== undefined) {
           // Persist the ROUTE-ENCODED id so a later session/new routes to the
