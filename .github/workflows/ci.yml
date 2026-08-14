@@ -40,20 +40,20 @@ jobs:
       # test suite is developed against; bump it deliberately when the
       # suite needs a newer dsh.
       #
-      # The checkout lives OUTSIDE the workspace (${{ runner.temp }}): rstest
+      # The checkout lives OUTSIDE the workspace ($RUNNER_TEMP): rstest
       # globs **/*.{test,spec}.ts over the whole repo, and the dsh snapshot
       # contains hundreds of its own spec files (some with
       # `@vitest-environment jsdom` comments) that would otherwise be picked
-      # up as tests of this project.
+      # up as tests of this project. actions/checkout refuses paths outside
+      # the workspace, so clone with git directly.
       - name: Checkout pinned dsh snapshot
-        uses: actions/checkout@v4
-        with:
-          repository: deepseek-ai/deepseek-harness
-          ref: 47f943859bef60e4160492346772ded9b24f765a
-          path: ${{ runner.temp }}/dsh
+        run: |
+          git clone --depth 1 https://github.com/deepseek-ai/deepseek-harness.git "$RUNNER_TEMP/dsh"
+          git -C "$RUNNER_TEMP/dsh" fetch --depth 1 origin 47f943859bef60e4160492346772ded9b24f765a
+          git -C "$RUNNER_TEMP/dsh" checkout 47f943859bef60e4160492346772ded9b24f765a
 
       - name: Generate tsconfig.json from the dsh snapshot
-        run: DSH_PATH="${{ runner.temp }}/dsh" node scripts/generate-tsconfig.mjs
+        run: DSH_PATH="$RUNNER_TEMP/dsh" node scripts/generate-tsconfig.mjs
 
       # Bare `cordis` / `schemastery` imports (src + tests) are not covered
       # by the tsconfig paths; install the vendored builds from the npm
@@ -68,4 +68,4 @@ jobs:
         run: pnpm exec biome lint .
 
       - name: Build
-        run: DSH_PATH="${{ runner.temp }}/dsh" pnpm build
+        run: DSH_PATH="$RUNNER_TEMP/dsh" pnpm build
