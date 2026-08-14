@@ -40,21 +40,21 @@ This installer performs the same bridge hookup automatically, then builds and wr
 
 Both paths behave identically afterwards (command, automatic herdr sidebar config, usage panels).
 
-### 分支包 / Branch packages
+### 分支安装 / Branch installs
 
-每个功能分支发布为独立的 npm 包，另一台设备一条命令即可安装测试该分支的构建：
+在另一台设备上测试某个分支的构建，一条 npm 命令直接从 GitHub 分支安装（**无需发布到公共 npm**）：
 
-Every feature branch is published as its own npm package — one command installs that branch's build on another machine:
+Testing a branch's build on another machine — one npm command installs straight from the GitHub branch (no public npm publish needed):
 
 ```sh
-npm install -g dsh-grok-tui-bridge-only     # 例：feat/bridge-only 分支的包 / e.g. the feat/bridge-only package
+npm install -g github:chen-001/dsh-grok-tui#feat/bridge-only   # 例：feat/bridge-only 分支
 grok-dsh setup                              # 挂进 dsh web profile（每台设备一次 / once per machine）
 dsh web && grok-dsh                         # 先启动 host 再开 TUI / host first, then the TUI
 ```
 
-包名规则：`dsh-grok-tui-<分支末段>`（`feat/xxx` → `dsh-grok-tui-xxx`）。发布与完整范式见 `docs/BRANCH-NPM-PUBLISH.md`。
+`#` 后是分支名；装的是该分支最新提交（含已提交的 dist），每次 push 后重跑该命令即更新。完整流程见 `docs/BRANCH-INSTALL.md`。
 
-Package naming: `dsh-grok-tui-<branch-segment>` (`feat/xxx` → `dsh-grok-tui-xxx`). Publishing and the full workflow live in `docs/BRANCH-NPM-PUBLISH.md`.
+`#` selects the branch; the install carries that branch's latest commit (committed dist included) — re-run the command after each push to update. Full workflow: `docs/BRANCH-INSTALL.md`.
 
 ## 使用 / Usage
 

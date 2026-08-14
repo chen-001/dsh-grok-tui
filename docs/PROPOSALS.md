@@ -160,27 +160,23 @@
 
 ## 已实施的方向变更
 
-### B2 · 分支 npm 发布流程 ✅ 已实现（v0.5.0）
+### B2 · 分支安装流程（GitHub 分支直装，零发布）✅ 已实现（v0.5.0）
 
 - **状态**: 已实现（2026-08-14，分支 `feat/bridge-only`）
-- **背景**: 用户需要在另一台设备上安装并测试各分支的新功能，要求每个
-  分支一个独立 npm 包 + 一条 npm install 命令 + 固定流程。
+- **背景**: 用户需要在另一台设备上安装并测试各分支的新功能。最初设计
+  为"每分支发布独立公共 npm 包"（publish-branch.sh），向用户讲解 npm
+  发布机制后，用户选择更合适的 **GitHub 分支直装**：零发布、零包名
+  占用、始终最新代码。
 - **方案**:
-  - 包名规则：`dsh-grok-tui-<分支末段>`（`feat/xxx` → `dsh-grok-tui-xxx`）；
-    main 保持 `dsh-grok-tui`
-  - 版本号自动带 commit（`0.5.0-bridge-only.414a73e`），每次发布唯一、
-    可追溯，无需手动管理版本
-  - `scripts/publish-branch.sh <branch>`：校验（工作区干净/分支匹配/
-    slug 合法/npm 登录/包名占用）→ 构建 → git archive 临时打包 + 覆盖
-    dist + 改写 name/version → npm publish --access public → 输出目标
-    设备安装命令；支持 --dry-run
-  - `docs/BRANCH-NPM-PUBLISH.md`：完整范式（发布流程、目标设备安装/
-    更新/卸载、main 发布、注意事项）
-  - README 增加「分支包」章节
-- **验证**: 脚本 dry-run 走到 npm 登录检查（当前未登录，正确拦截）；
-  打包改名逻辑单独验证通过；postinstall 对目标设备无害
-- **待办**: 用户执行 `npm adduser` 登录后，实际发布现有两个分支
-  （slash-commands、bridge-only）的包
+  - 目标设备一条命令：`npm install -g github:chen-001/dsh-grok-tui#<分支>`
+  - 装的是分支最新提交（含已提交的 dist）；每次 push 后重跑即更新
+  - 项目原生支持：dist 一直提交（.gitignore 注释写明 git 安装需要）、
+    postinstall 的 materialize 逻辑处理 npm git-clone 缓存
+  - `docs/BRANCH-INSTALL.md`：完整流程（安装/换分支/发布侧流程/注意
+    事项）
+  - README 增加「分支安装」章节
+  - `scripts/publish-branch.sh` 保留为可选工具（未来公开分发时用）
+- **验证**: 分支推送后实测 npm 安装命令（见 v0.5.0 提交记录）
 
 ---
 
