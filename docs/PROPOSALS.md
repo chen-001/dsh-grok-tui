@@ -110,7 +110,7 @@
 
 ### I1 · CI 流水线（GitHub Actions）
 
-- **状态**: 待定　**价值**: 高　**成本**: 低
+- **状态**: 已实现（2026-08-14，分支 `feat/usage-panel-pagination`，CI 覆盖全分支）
 - **现状**: 仓库无任何 CI，122 个测试全靠本地跑。
 - **方案**: `.github/workflows/ci.yml`：pnpm install + pnpm test + biome
   check + build（DSH_PATH 用固定 dsh 快照 checkout），push / PR 自动执行。
