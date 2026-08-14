@@ -142,12 +142,39 @@
 
 ## 优化（I）
 
-### I1 · CI 流水线（GitHub Actions）
+### I1 · CI 流水线（GitHub Actions）✅ 已实现
 
-- **状态**: 待定　**价值**: 高　**成本**: 低
+- **状态**: 已实现（2026-08-14，分支 `feat/usage-panel-pagination`，并
+  cherry-pick 到 `main` / `feat/slash-commands` / `feat/bridge-only` /
+  `feat/session-title`，每个分支 push 都会触发）
+- **价值**: 高　**成本**: 低
 - **现状**: 仓库无任何 CI，122 个测试全靠本地跑。
 - **方案**: `.github/workflows/ci.yml`：pnpm install + pnpm test + biome
   check + build（DSH_PATH 用固定 dsh 快照 checkout），push / PR 自动执行。
+- **实现**:
+  - `.github/workflows/ci.yml`：`on: push` + `on: pull_request`（一份配置
+    覆盖所有分支；push 事件检查被推送分支上的工作流文件，因此每个分支
+    都带同一份 ci.yml）；步骤 = pnpm install → 用固定 deepseek-harness
+    commit `47f94385`（2026-08-13，与本地快照 08-12 最接近的公开 commit）
+    生成 tsconfig.json（`@deepseek-ai/*` 经 tsconfig paths 解析到 dsh
+    源码，与本地 `~/.dsh/source/current` 机制一致）→ `pnpm add -D`
+    `cordis@npm:@deepseek-ai/cordis@4.0.1-rc.1` 与
+    `schemastery@npm:@deepseek-ai/schemastery@3.18.1-rc.1`（裸名 import
+    不在 paths 覆盖内，装 vendored 版本）→ `pnpm test` → `biome lint`
+    → `DSH_PATH=... pnpm build`
+  - 偏离方案的两点：① biome 用 `biome lint` 而非 `biome check`（check
+    含 format 检查，仓库存在大量既有格式差异，lint 严格检查代码质量）；
+    ② 修复了 19 处既有 lint 错误（useTemplate / useLiteralKeys /
+    noUnusedVariables / noImplicitAnyLet / noNonNullAssertion /
+    noUnsafeOptionalChaining 等，测试断言处加 biome-ignore 注释），
+    biome.json 排除 dist（生成物）并改用 `preset` 字段
+  - 验证：本地完整模拟 CI 环境（干净 clone + registry 依赖 + 固定 dsh
+    commit）151 例测试全绿、lint 全绿、build 通过；各分支基线测试
+    main 122 / slash-commands 136 / bridge-only 136 / session-title 139
+    全部通过
+- **依据**: 本地开发环境依赖解析机制（tsconfig paths + node_modules
+  链接）；deepseek-harness 公开仓库（`@deepseek-ai/dsh-root`）与 npm
+  registry 上的 vendored 包（`@deepseek-ai/cordis` 等）。
 
 ### I2 · usage 状态文件写盘节流
 
