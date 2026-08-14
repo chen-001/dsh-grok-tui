@@ -1,0 +1,62 @@
+name: CI
+
+# Runs on every push to ANY branch and on every pull request: one workflow
+# file covers all branches (including future feat/* branches), so a branch
+# pushed for GitHub-install testing is verified before anyone installs it.
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      # The tests import unpublished @deepseek-ai/* workspace packages. They
+      # resolve through the tsconfig paths generated from a PINNED dsh
+      # checkout (the same mechanism the local dev environment uses with
+      # ~/.dsh/source/current). The commit below is the dsh snapshot the
+      # test suite is developed against; bump it deliberately when the
+      # suite needs a newer dsh.
+      - name: Checkout pinned dsh snapshot
+        uses: actions/checkout@v4
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: 47f943859bef60e4160492346772ded9b24f765a
+          path: dsh
+
+      - name: Generate tsconfig.json from the dsh snapshot
+        run: DSH_PATH="$GITHUB_WORKSPACE/dsh" node scripts/generate-tsconfig.mjs
+
+      # Bare `cordis` / `schemastery` imports (src + tests) are not covered
+      # by the tsconfig paths; install the vendored builds from the npm
+      # registry under their bare names, pinned to the snapshot's versions.
+      - name: Install vendored cordis/schemastery aliases
+        run: pnpm add -D cordis@npm:@deepseek-ai/cordis@4.0.1-rc.1 schemastery@npm:@deepseek-ai/schemastery@3.18.1-rc.1
+
+      - name: Test
+        run: pnpm test
+
+      - name: Lint
+        run: pnpm exec biome lint .
+
+      - name: Build
+        run: DSH_PATH="$GITHUB_WORKSPACE/dsh" pnpm build

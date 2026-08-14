@@ -10,7 +10,7 @@ import { execFile } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from '@rstest/core'
+import { afterAll, describe, expect, it } from '@rstest/core'
 
 const pluginDir = join(import.meta.dirname, '..')
 const base = await mkdtemp(join(tmpdir(), 'grok-install-profile-'))

@@ -38,8 +38,8 @@ const args = Object.fromEntries(process.argv.slice(2).map((arg, i, all) => {
 
 const pluginDir = args['plugin-dir'];
 const dshHome = args['dsh-home'];
-const profileName = args['profile'] ?? 'web';
-const checkout = args['checkout'] ?? join(dshHome, 'source', 'current');
+const profileName = args.profile ?? 'web';
+const checkout = args.checkout ?? join(dshHome, 'source', 'current');
 if (!pluginDir || !dshHome) {
   console.error('install-profile.mjs: --plugin-dir and --dsh-home are required');
   process.exit(1);
@@ -73,12 +73,12 @@ if (!existsSync(manifestPath)) {
   const bundles = profileName === 'headless'
     ? ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', '@deepseek-ai/dsh-headless']
     : ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'];
-  writeFileSync(manifestPath, JSON.stringify({
+  writeFileSync(manifestPath, `${JSON.stringify({
     name: `dsh-profile-${profileName}`,
     private: true,
     dependencies: {},
     dsh: { profile: { bundles } },
-  }, null, 2) + '\n');
+  }, null, 2)}\n`);
 }
 const workspacePath = join(profileDir, 'pnpm-workspace.yaml');
 if (!existsSync(workspacePath)) {
@@ -209,7 +209,7 @@ if (grokBlocks.length > 0) {
     // blocks' recorded positions valid.
     const sorted = [...grokBlocks].sort((a, b) => b.start - a.start);
     for (const block of sorted) patch = removeBlockLines(patch, block);
-    patch = patch.replace(/\s*$/, '') + '\n\n' + GROK_SERVER_BLOCK;
+    patch = `${patch.replace(/\s*$/, '')}\n\n${GROK_SERVER_BLOCK}`;
     console.log(
       `install-profile: replaced ${grokBlocks.length} grok-server block(s) with the current one in ${patchPath}`,
     );
@@ -233,7 +233,7 @@ if (grokBlocks.length > 0) {
     patch = `${GROK_SERVER_BLOCK}`;
   } else {
     // A user-edited layer: append the insert at the end of the YAML list.
-    patch = patch.replace(/\s*$/, '') + '\n\n' + GROK_SERVER_BLOCK;
+    patch = `${patch.replace(/\s*$/, '')}\n\n${GROK_SERVER_BLOCK}`;
     console.log(`install-profile: wrote grok-server insert into ${patchPath}`);
   }
 }

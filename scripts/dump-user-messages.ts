@@ -49,7 +49,7 @@ try {
     )
   }
   if (tornStart !== undefined) {
-    text += '(torn tail frame at ' + tornStart + ')'
+    text += `(torn tail frame at ${tornStart})`
   }
   const { meta, events } = scanLog(Buffer.from(text, 'utf8'))
   console.log(

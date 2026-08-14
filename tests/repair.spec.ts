@@ -69,7 +69,7 @@ describe('repairInterleavedLog', () => {
     const checksum = { params: { [constants.ZSTD_c_checksumFlag]: 1 } }
     const frame = async (lines: string[]): Promise<Buffer> => {
       return zstdCompressAsync(
-        Buffer.from(lines.join('\n') + '\n', 'utf8'),
+        Buffer.from(`${lines.join('\n')}\n`, 'utf8'),
         checksum,
       )
     }
@@ -114,7 +114,7 @@ describe('repairInterleavedLog', () => {
     const buf = await readFile(path)
     const frames = scanZstdFrames(buf, 1_000_000)
     const first = (
-      await zstdDecompressAsync(buf.subarray(frames[0]!.start, frames[0]!.end))
+      await zstdDecompressAsync(buf.subarray(frames[0]?.start, frames[0]?.end))
     ).toString('utf8')
     expect(first).toBe(`${header}\n`)
     await rm(dir, { recursive: true, force: true })
@@ -142,7 +142,7 @@ describe('repairInterleavedLog', () => {
     const checksum = { params: { [constants.ZSTD_c_checksumFlag]: 1 } }
     const frame = async (lines: string[]): Promise<Buffer> => {
       return zstdCompressAsync(
-        Buffer.from(lines.join('\n') + '\n', 'utf8'),
+        Buffer.from(`${lines.join('\n')}\n`, 'utf8'),
         checksum,
       )
     }

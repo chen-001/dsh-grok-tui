@@ -46,7 +46,7 @@ describe('approval answerer coexistence in the official host', () => {
     // real host it is registered BEFORE grok's listener; grok prepends so
     // grok-owned sessions still claim first.
     const webClaims: string[] = []
-    harness.ctx.on('approval/request', (req, next) => {
+    harness.ctx.on('approval/request', (req, _next) => {
       webClaims.push(String(req.agent.session.id))
       return Promise.resolve('rejected' as const)
     })
@@ -66,8 +66,9 @@ describe('approval answerer coexistence in the official host', () => {
     const grokSessionId = created.sessionId as never
     const grokAgent = harness.ctx.agents.get(grokSessionId)
     expect(grokAgent).toBeDefined()
-    openTurn(grokAgent!.session)
+    openTurn(grokAgent?.session)
     const grokOutcome = await harness.ctx.approval.request({
+      // biome-ignore lint/style/noNonNullAssertion: guarded by expect above
       agent: grokAgent!,
       toolName: 'bash',
       callId: 'call-grok-1' as never,
