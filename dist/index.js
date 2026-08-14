@@ -341,6 +341,97 @@ async function readArchivedSessionIds(storagesRoot) {
     if (!Array.isArray(archived)) throw new Error(`workspace storage unit is malformed: missing global.archivedSessionIds array in ${unitPath}`);
     return new Set(archived.filter((id)=>'string' == typeof id));
 }
+const PAGER_BUILTIN_COMMANDS = new Set([
+    'always-approve',
+    'announcements',
+    'auto',
+    'btw',
+    'cd',
+    'compact',
+    'compact-mode',
+    'config-agents',
+    'context',
+    'copy',
+    'dashboard',
+    'debug',
+    'delete',
+    'docs',
+    'doctor',
+    'edit-prompt',
+    'effort',
+    'expand',
+    'export',
+    'feedback',
+    'find',
+    'fork',
+    'gboom',
+    'help',
+    'history',
+    'home',
+    'hooks',
+    'import-claude',
+    'jump',
+    'login',
+    'logout',
+    'loop',
+    'mcps',
+    'model',
+    'multiline',
+    'new',
+    'personas',
+    'plan',
+    'privacy',
+    'queue',
+    'quit',
+    'recap',
+    'release-notes',
+    'remember',
+    'rename',
+    'resume',
+    'rewind',
+    'scroll-debug',
+    'session-info',
+    'settings',
+    'share',
+    'tasks',
+    'theme',
+    'timeline',
+    'timestamps',
+    'toggle-mouse-reporting',
+    "transcript",
+    'tutorial',
+    'usage',
+    'view-plan',
+    'vim-mode',
+    'voice',
+    'workflows'
+]);
+function parseSlashLine(line) {
+    const match = /^\/([a-z][a-z0-9_-]*)(?=$|[\t\n\r ])/u.exec(line);
+    if (null === match) return;
+    const name = match[1];
+    if (void 0 === name) return;
+    return {
+        name,
+        rawInput: line.slice(match[0].length)
+    };
+}
+function isPagerBuiltin(name) {
+    return PAGER_BUILTIN_COMMANDS.has(name);
+}
+function filterPagerConflicts(descriptors) {
+    return descriptors.filter((descriptor)=>!isPagerBuiltin(descriptor.name));
+}
+function toAvailableCommands(descriptors) {
+    return descriptors.map((descriptor)=>({
+            name: descriptor.name,
+            description: descriptor.description,
+            input: descriptor.input?.hint !== void 0 && descriptor.input.hint.length > 0 ? {
+                type: 'unstructured',
+                hint: descriptor.input.hint
+            } : null
+        }));
+}
 const ASK_DESCRIPTION = "Ask the user a concise question when you need confirmation, a choice, or missing information before proceeding. Send one or more questions, each with a stable id that will be echoed in the answer.";
 const askUserQuestionParameters = {
     questions: {
@@ -1321,6 +1412,55 @@ function createAcpAgent(ctx, config, channel, logger, questions, lastModel) {
         record.disposeShadow?.();
         record.disposeShadow = installShadowAsk(record.agent.ctx, questions);
     };
+    const commands = ctx.get('commands');
+    const dshCommandsOf = (record)=>{
+        if (void 0 === commands) return [];
+        return filterPagerConflicts(commands.list(record.agent));
+    };
+    const pushAvailableCommands = (record)=>{
+        if (void 0 === conn) return;
+        const availableCommands = toAvailableCommands(dshCommandsOf(record));
+        conn.sessionUpdate({
+            sessionId: record.agent.session.id,
+            update: {
+                sessionUpdate: 'available_commands_update',
+                availableCommands
+            }
+        }).catch((error)=>{
+            logger.warn(`grok-server: available_commands_update failed: ${String(error)}`);
+        });
+    };
+    const tryExecuteDshCommand = async (record, text)=>{
+        if (void 0 === commands) return false;
+        const line = text.trim();
+        const parsed = parseSlashLine(line);
+        if (void 0 === parsed) return false;
+        if (isPagerBuiltin(parsed.name)) return false;
+        if (!dshCommandsOf(record).some((cmd)=>cmd.name === parsed.name)) return false;
+        const controller = new AbortController();
+        record.commandAbort?.abort();
+        record.commandAbort = controller;
+        logger.info(`grok-server: executing DSH command /${parsed.name} for session ${record.agent.session.id}`);
+        let resultText;
+        try {
+            const execution = await commands.execute(record.agent, line, controller.signal);
+            resultText = void 0 === execution ? `Unknown command /${parsed.name}.` : execution.result.text ?? '';
+        } catch (error) {
+            const detail = error instanceof Error ? error.message : String(error);
+            resultText = `Command /${parsed.name} failed: ${detail}`;
+        }
+        notify({
+            sessionId: record.agent.session.id,
+            update: {
+                sessionUpdate: 'agent_message_chunk',
+                content: {
+                    type: 'text',
+                    text: resultText
+                }
+            }
+        });
+        return true;
+    };
     const resumeWithRepair = async (sessionId)=>{
         const adopted = adoptLiveAgent(sessionId);
         if (void 0 !== adopted) return {
@@ -1488,6 +1628,10 @@ function createAcpAgent(ctx, config, channel, logger, questions, lastModel) {
     }, {
         prepend: true
     });
+    const disposeCommandsChange = ctx.on('commands/change', ()=>{
+        if (void 0 === conn) return;
+        for (const record of sessions.values())pushAvailableCommands(record);
+    });
     const agent = {
         async initialize (_params) {
             return {
@@ -1530,6 +1674,7 @@ function createAcpAgent(ctx, config, channel, logger, questions, lastModel) {
                 connectionRef().extNotification('_x.ai/mcp_initialized', {
                     sessionId: String(sessionId)
                 });
+                pushAvailableCommands(adopted);
                 return {
                     sessionId
                 };
@@ -1584,6 +1729,7 @@ function createAcpAgent(ctx, config, channel, logger, questions, lastModel) {
             connectionRef().extNotification('_x.ai/mcp_initialized', {
                 sessionId: String(sessionId)
             });
+            pushAvailableCommands(record);
             return {
                 sessionId
             };
@@ -1597,6 +1743,9 @@ function createAcpAgent(ctx, config, channel, logger, questions, lastModel) {
             const text = acpPromptToText(params.prompt);
             if (0 === text.trim().length) throw invalidParams('empty prompt');
             await alignWithSharedLog(record, sessionId);
+            if (await tryExecuteDshCommand(record, text)) return {
+                stopReason: 'end_turn'
+            };
             if (ctx.agents.get(record.agent.id) !== record.agent) throw internalError('prompt was not queued: the agent was disposed outside the bridge');
             const stopReason = await new Promise((resolve, reject)=>{
                 const message = createUserMessage({
@@ -1637,6 +1786,7 @@ function createAcpAgent(ctx, config, channel, logger, questions, lastModel) {
         cancel (params) {
             const record = sessions.get(SessionId(params.sessionId));
             if (void 0 === record) return Promise.resolve();
+            record.commandAbort?.abort();
             record.agent.cancel({
                 kind: 'user'
             });
@@ -1674,6 +1824,7 @@ function createAcpAgent(ctx, config, channel, logger, questions, lastModel) {
                 sessionId: String(sessionId)
             });
             await replaySession(sessionId, record.agent.session.events);
+            pushAvailableCommands(record);
             return {};
         },
         async extMethod (method, params) {
@@ -1772,9 +1923,16 @@ function createAcpAgent(ctx, config, channel, logger, questions, lastModel) {
                     }
                 };
             }
-            if ('x.ai/commands/list' === method) return {
-                commands: []
-            };
+            if ('x.ai/commands/list' === method) {
+                const { sessionId } = params;
+                if ('string' != typeof sessionId) return {
+                    commands: []
+                };
+                const record = requireSession(SessionId(sessionId));
+                return {
+                    commands: toAvailableCommands(dshCommandsOf(record))
+                };
+            }
             if (method.startsWith('x.ai/')) return {};
             throw RequestError.methodNotFound(method);
         },
@@ -1806,6 +1964,7 @@ function createAcpAgent(ctx, config, channel, logger, questions, lastModel) {
         if (void 0 !== questions) questions.register(String(sessionId), connectionRef());
         record.logIdentity = await logIdentityOf(handle.agent.session) ?? current;
         await replaySession(sessionId, record.agent.session.events);
+        pushAvailableCommands(record);
     };
     async function replaySession(id, events) {
         const replayCalls = new Map();
@@ -1836,6 +1995,7 @@ function createAcpAgent(ctx, config, channel, logger, questions, lastModel) {
         disposeClaimed();
         disposeFlush();
         disposeApproval();
+        disposeCommandsChange();
         const records = [
             ...sessions.values()
         ];

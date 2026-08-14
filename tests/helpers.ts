@@ -325,6 +325,28 @@ export interface GrokHarness {
   dispose: () => Promise<void>
 }
 
+/** Mock `ctx.commands` surface for the DSH command bridge tests. */
+export interface MockCommands {
+  descriptors: Array<{
+    name: string
+    description: string
+    input?: { hint?: string }
+  }>
+  /** Slash lines passed to `execute`, in order. */
+  executed: string[]
+  list(agent: unknown): MockCommands['descriptors']
+  execute(
+    agent: unknown,
+    line: string,
+    signal: AbortSignal,
+  ): Promise<
+    | {
+      result: { kind: 'success' | 'error'; text?: string }
+    }
+    | undefined
+  >
+}
+
 /** Mount the real agent loop + mock adapter + the grok server plugin. */
 export async function makeGrokHarness(options: {
   socketPath: string
@@ -337,6 +359,8 @@ export async function makeGrokHarness(options: {
   /** Port of a fake/real web host API gateway the attach goes through. */
   webPort?: number
   contextWindow?: number
+  /** Mock `ctx.commands` service for the DSH command bridge. */
+  commands?: MockCommands
 }): Promise<GrokHarness> {
   const adapter = new MockAdapter(
     options.script ?? [],
@@ -367,6 +391,15 @@ export async function makeGrokHarness(options: {
     dispose: async () => {
       await ctx.fiber.dispose()
     },
+  }
+
+  if (options.commands !== undefined) {
+    await ctx.plugin({
+      name: 'mock-commands',
+      apply: (inner: Context) => {
+        inner.provide('commands', options.commands as never)
+      },
+    })
   }
 
   await ctx.plugin({

@@ -256,7 +256,7 @@ Unix domain socket, mirroring `xai-grok-shell/src/leader/protocol.rs`:
 | `session/prompt` | Text blocks → `agent.followup`; one in-flight prompt per session; settles from the owning `turn/end` with the mapped stop reason. |
 | `session/cancel` | Cancels the addressed agent and settles its pending prompt as `cancelled`. |
 | `session/set_model` | Routes the pager's model switch through `ctx.llm.resolveCallConfig` + `installAgentLlmTarget`. |
-| `x.ai/commands/list` | Empty catalog (the pager's builtin slash commands stay authoritative). |
+| `x.ai/commands/list` | Serves the DSH command registry (`ctx.commands.list`) filtered of pager-builtin collisions; the pager merges the rows into its slash menu. |
 | other `x.ai/*` / `_x.ai/*` | Empty results; unknown methods fail with method-not-found. |
 
 ### Notifications (`src/translate/events.ts`)
@@ -305,9 +305,34 @@ append-only.
 - **No auth layer on the leader socket** — the socket path is the only fence; a process client that can reach it can drive the harness. Same posture as the pager's own leader.
 - **Windows named pipes not implemented** — the leader transport is Unix-socket-only; the pager's Windows pipe hash is documented in the grok source for a future port.
 - **`session/load` cursor ignored** — replays the whole transcript; the pager dedups by `eventId`, so this is safe but not optimal for large logs.
-- **Slash commands are pager-builtin only** — `x.ai/commands/list` returns an empty catalog; DSH's host command registry is not advertised.
 - **`session_info_update` not sent** — session titles stay off the wire (the pager falls back to the first prompt); `usage_update` **is** sent (it drives the context/stats bars, see "Status bar" above).
 - **`extNotification` ignores all `_x.ai/*` notifications** — the pager's telemetry logs are dropped (never forwarded anywhere).
+
+## DSH command bridge (slash commands in the TUI)
+
+DSH registers its human-facing slash commands (`/goal`, `/feedback`, …) in
+the `ctx.commands` registry (`@deepseek-ai/dsh-commands`). The bridge exposes
+them to the pager:
+
+- **Catalog**: after every session/new, session/load and re-align the server
+  pushes an ACP `available_commands_update` notification, and the pager's
+  `x.ai/commands/list` pull is answered from `ctx.commands.list(agent)`
+  (`src/commands-bridge.ts`). Commands whose name collides with a pager
+  builtin (`/plan`, `/resume`, `/model`, …) are filtered out — the pager's
+  own builtin keeps winning the keystroke.
+- **Execution**: the pager has no ACP method to RUN an agent command; picking
+  one produces a `PassThrough` prompt (`/goal …` as plain text). The
+  `session/prompt` handler intercepts slash lines that resolve to a DSH
+  command and executes them through `ctx.commands.execute(agent, line,
+  signal)` instead of handing the raw line to the model (which has no idea
+  what `/goal` means). The handler's result text is delivered back to the
+  pager as a single assistant message; `session/cancel` aborts an in-flight
+  execution.
+- **Service availability**: the commands service is duck-typed through
+  `ctx.get('commands')`. The official host mounts it (web profile); the
+  standalone daemon mounts `dsh-commands` + `dsh-command-goal` in
+  `scripts/serve-real.ts`. Absent service = no menu entries and no
+  interception.
 
 ## Development
 

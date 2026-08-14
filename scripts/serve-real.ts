@@ -45,6 +45,8 @@ import * as BashEnv from '@deepseek-ai/dsh-bash-env'
 import BashSandbox from '@deepseek-ai/dsh-bash-sandbox'
 import CompactBasic from '@deepseek-ai/dsh-compact-basic'
 import ToolResultPrune from '@deepseek-ai/dsh-compact-tool-result-prune'
+import CommandGoal from '@deepseek-ai/dsh-command-goal'
+import Commands from '@deepseek-ai/dsh-commands'
 import CredentialsLocal from '@deepseek-ai/dsh-credentials-local'
 import * as FsPolicy from '@deepseek-ai/dsh-fs-policy'
 import FsSandbox from '@deepseek-ai/dsh-fs-sandbox'
@@ -226,6 +228,13 @@ await ctx.plugin(LlmRetry)
 await ctx.plugin(Goal)
 await ctx.plugin(GoalSession)
 await ctx.plugin(ToolGoal)
+// Human command registry + the /goal slash command (F1): the grok pager's
+// slash menu advertises DSH commands and the bridge executes them directly
+// (src/commands-bridge.ts + src/acp-server.ts). The official host already
+// mounts these (web profile), so the standalone daemon mirrors goal only —
+// command-compact/command-feedback need services this daemon does not mount.
+await ctx.plugin(Commands)
+await ctx.plugin(CommandGoal)
 // Plan mode: the kernel plan-mode plugin owns the mode state, the plan
 // prompt section, and the exit_plan_mode review tool (its approval routes
 // through userQuestions to the pager's plan-review dialog); grok-plan-tool

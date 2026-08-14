@@ -94,6 +94,9 @@ plugin's tests (they pin the wire literals).
 | `mcpServers` carried on session/new (with secrets) | `src/acp-server.ts` | ignored by design — re-confirm on change |
 | `_meta.totalTokens` + `_meta.dshUsage` + `usage_update` notification | `src/translate/events.ts`, `src/usage.ts` | context/stats bars go stale (session still works) |
 | `totalContextTokens` in model-state meta | `src/acp-server.ts` modelState | context bar has no denominator |
+| `available_commands_update` notification + `x.ai/commands/list` | `src/commands-bridge.ts`, `src/acp-server.ts` | DSH slash commands vanish from the menu (prompts still flow; builtin commands unaffected) |
+| PassThrough slash-prompt interception | `src/acp-server.ts` prompt | `/goal …` text reaches the model instead of executing; DSH commands degrade to no-op |
+| pager builtin command names (collision filter) | `src/commands-bridge.ts` `PAGER_BUILTIN_COMMANDS` | a renamed/added grok builtin either collides (DSH command filtered) or stops colliding (DSH command appears) — safe by construction |
 
 The pager is designed to degrade gracefully on unknown fields, so most
 changes surface as missing polish, not breakage.
@@ -111,6 +114,7 @@ freely (`AGENTS.md`: "foundation over blast radius"). Coupled APIs:
 - `ctx.llm.listProviders/listModels/resolveCallConfig` (`dsh-llm`)
 - `installAgentLlmTarget` (`dsh-agent/llm-target`)
 - `userQuestions.registerProvider` (`dsh-user-questions`)
+- `ctx.commands.list/execute` (`dsh-commands` — duck-typed via `ctx.get('commands')`; the bridge's `CommandsServiceLike` surface must follow `CommandDescriptor`/`CommandExecution` shape changes)
 
 TypeScript surfaces these changes at rebuild time; fixes are mechanical.
 

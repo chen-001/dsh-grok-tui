@@ -175,6 +175,8 @@ describe('session/load', () => {
     expect(loaded).toBeDefined()
 
     // The replay re-delivers the history: user echo + committed answer.
+    // (The post-load available_commands_update catalog push is not part of
+    // the transcript stream and carries no isReplay marker.)
     const replayed = harness.notifications.slice(before)
     const chunks = replayed.filter(
       update => update.update.sessionUpdate === 'agent_message_chunk',
@@ -185,7 +187,12 @@ describe('session/load', () => {
     expect(chunks.length).toBeGreaterThan(0)
     expect(userEchoes.length).toBeGreaterThan(0)
     expect(
-      replayed.every(notification => notification._meta?.isReplay === true),
+      replayed
+        .filter(
+          update =>
+            update.update.sessionUpdate !== 'available_commands_update',
+        )
+        .every(notification => notification._meta?.isReplay === true),
     ).toBe(true)
     client.transport.close()
   })

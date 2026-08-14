@@ -47,6 +47,14 @@ import {
 import type {} from '@deepseek-ai/dsh-user-approval'
 import type { Context, LoggerService } from 'cordis'
 import { readArchivedSessionIds } from './archive.ts'
+import {
+  type CommandsServiceLike,
+  type DshCommandDescriptor,
+  filterPagerConflicts,
+  isPagerBuiltin,
+  parseSlashLine,
+  toAvailableCommands,
+} from './commands-bridge.ts'
 import { installShadowAsk } from './bridge/shadow-ask.ts'
 import type { QuestionRouter } from './bridge/question.ts'
 import {
@@ -147,6 +155,13 @@ interface SessionRecord {
    * re-carrying seqs the log already holds.
    */
   logIdentity?: { size: number; mtimeMs: number }
+  /**
+   * Abort controller of the in-flight DSH command execution (set only while
+   * a slash command is being executed, see `tryExecuteDshCommand`). The
+   * connection's `session/cancel` aborts it so the command handler sees the
+   * user's cancellation.
+   */
+  commandAbort?: AbortController
 }
 
 /** ACP-facing plugin configuration. */
@@ -333,6 +348,108 @@ export function createAcpAgent(
     }
     record.disposeShadow?.()
     record.disposeShadow = installShadowAsk(record.agent.ctx, questions)
+  }
+
+  // ── DSH command bridge (F1) ────────────────────────────────────────────────
+  // The host's command registry (`@deepseek-ai/dsh-commands`) is duck-typed
+  // through `ctx.get('commands')`: absent in compositions that never mount it
+  // (then no menu entries are advertised and no prompts are intercepted).
+  const commands = ctx.get('commands') as CommandsServiceLike | undefined
+
+  /** The agent's effective DSH commands, minus pager-builtin collisions. */
+  const dshCommandsOf = (
+    record: SessionRecord,
+  ): DshCommandDescriptor[] => {
+    if (commands === undefined) return []
+    return filterPagerConflicts(commands.list(record.agent))
+  }
+
+  /**
+   * Push the current DSH command catalog to the pager as an ACP
+   * `available_commands_update` notification. Called after session/new,
+   * session/load and re-align (the pager's slash menu reads this to render
+   * agent-advertised commands; the `x.ai/commands/list` pull covers later
+   * refreshes).
+   */
+  const pushAvailableCommands = (record: SessionRecord): void => {
+    if (conn === undefined) return
+    const availableCommands = toAvailableCommands(dshCommandsOf(record))
+    void conn
+      .sessionUpdate({
+        sessionId: record.agent.session.id,
+        update: {
+          sessionUpdate: 'available_commands_update',
+          availableCommands,
+        },
+      })
+      .catch((error: unknown) => {
+        logger.warn(
+          `grok-server: available_commands_update failed: ${String(error)}`,
+        )
+      })
+  }
+
+  /**
+   * Intercept a prompt whose text is a DSH slash command and execute it
+   * directly through the commands registry instead of sending it to the
+   * model. The pager has no ACP method to run an agent command — picking one
+   * produces a `PassThrough` prompt (`/goal …` as plain text) — and the model
+   * has no idea what `/goal` means, so the bridge executes the command and
+   * delivers the handler's result text back to the pager as a single
+   * assistant message.
+   * @param record - the owning session record.
+   * @param text - the prompt text (trimmed).
+   * @returns whether the prompt was consumed as a command.
+   */
+  const tryExecuteDshCommand = async (
+    record: SessionRecord,
+    text: string,
+  ): Promise<boolean> => {
+    if (commands === undefined) return false
+    const line = text.trim()
+    const parsed = parseSlashLine(line)
+    if (parsed === undefined) return false
+    // The pager handles its own builtins locally and never sends them here,
+    // but a foreign client could: refuse builtin names so the pager's
+    // keystroke ownership stays authoritative.
+    if (isPagerBuiltin(parsed.name)) return false
+    if (!dshCommandsOf(record).some(cmd => cmd.name === parsed.name)) {
+      return false
+    }
+    const controller = new AbortController()
+    record.commandAbort?.abort()
+    record.commandAbort = controller
+    logger.info(
+      `grok-server: executing DSH command /${parsed.name} for session ${record.agent.session.id}`,
+    )
+    let resultText: string
+    try {
+      const execution = await commands.execute(
+        record.agent,
+        line,
+        controller.signal,
+      )
+      if (execution === undefined) {
+        // The command vanished between list and execute (unregistered by a
+        // plugin): surface the miss instead of sending `/goal` to the model.
+        resultText = `Unknown command /${parsed.name}.`
+      } else {
+        resultText = execution.result.text ?? ''
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      resultText = `Command /${parsed.name} failed: ${detail}`
+    }
+    // Deliver the result as one assistant text message (the pager renders
+    // agent_message_chunk as a committed message once the turn settles).
+    notify({
+      sessionId: record.agent.session.id,
+      update: {
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: resultText },
+      },
+    })
+    return true
   }
 
   /**
@@ -694,6 +811,20 @@ export function createAcpAgent(
     { prepend: true },
   )
 
+  // A command registered or unregistered while grok sessions are live: push
+  // the refreshed catalog to every owned session's pager so the slash menu
+  // tracks the registry (emit-mode; a failing push never vetoes the change).
+  // The commands/change event name is merge-extended by dsh-commands' own
+  // module augmentation; the standalone tsc environment (two cordis copies)
+  // cannot see it, so the cast keeps this file's type surface identical to
+  // the host runtime, which always dispatches the event.
+  const disposeCommandsChange = ctx.on(
+    'commands/change' as Parameters<typeof ctx.on>[0],
+    () => {
+    if (conn === undefined) return
+    for (const record of sessions.values()) pushAvailableCommands(record)
+  })
+
   const agent: AcpAgent = {
     async initialize(_params: InitializeRequest): Promise<InitializeResponse> {
       // Single-version agent: the spec's "same version if supported, else the
@@ -750,6 +881,7 @@ export function createAcpAgent(
         void connectionRef().extNotification('_x.ai/mcp_initialized', {
           sessionId: String(sessionId),
         })
+        pushAvailableCommands(adopted)
         return { sessionId }
       }
       // Self-heal on-disk limbo before creating: dsh's create path skips
@@ -841,6 +973,10 @@ export function createAcpAgent(
       void connectionRef().extNotification('_x.ai/mcp_initialized', {
         sessionId: String(sessionId),
       })
+      // Advertise the DSH command catalog so the pager's slash menu picks up
+      // /goal & co. immediately (the later x.ai/commands/list pull is the
+      // refresh path).
+      pushAvailableCommands(record)
       return { sessionId }
     },
 
@@ -860,6 +996,14 @@ export function createAcpAgent(
       if (text.trim().length === 0) throw invalidParams('empty prompt')
 
       await alignWithSharedLog(record, sessionId)
+
+      // DSH command bridge (F1): the pager sends an agent-advertised command
+      // as a PassThrough prompt (`/goal …`). Execute it through the commands
+      // registry instead of handing the raw line to the model; the result is
+      // delivered back as an assistant message.
+      if (await tryExecuteDshCommand(record, text)) {
+        return { stopReason: 'end_turn' }
+      }
 
       if (ctx.agents.get(record.agent.id) !== record.agent) {
         throw internalError(
@@ -902,6 +1046,9 @@ export function createAcpAgent(
     cancel(params: CancelNotification): Promise<void> {
       const record = sessions.get(SessionId(params.sessionId))
       if (record === undefined) return Promise.resolve()
+      // Abort an in-flight DSH command execution (F1) so the handler observes
+      // the user's cancellation, then cancel the agent turn as usual.
+      record.commandAbort?.abort()
       record.agent.cancel({ kind: 'user' })
       settlePrompt(record, 'cancelled')
       return Promise.resolve()
@@ -955,6 +1102,8 @@ export function createAcpAgent(
       // Replay the durable transcript as isReplay notifications; the pager
       // dedups by event id, so a later cursor is safe to ignore.
       await replaySession(sessionId, record.agent.session.events)
+      // Re-advertise the DSH command catalog after a load/re-align swap.
+      pushAvailableCommands(record)
       return {}
     },
 
@@ -1145,10 +1294,15 @@ export function createAcpAgent(
         }
       }
       if (method === 'x.ai/commands/list') {
-        // The pager refreshes its slash-command registry from the agent; DSH's
-        // command registry stays host-side for now, so an empty catalog keeps
-        // the pager's builtins authoritative without an error round-trip.
-        return { commands: [] }
+        // The pager's slash menu pull (session-scoped; the pre-session pull
+        // without a sessionId gets an empty catalog — there is no agent to
+        // view scoped commands for yet). Serves the DSH command registry
+        // filtered of pager-builtin collisions; the pager merges these rows
+        // into its own slash menu.
+        const { sessionId } = params as { sessionId?: unknown }
+        if (typeof sessionId !== 'string') return { commands: [] }
+        const record = requireSession(SessionId(sessionId))
+        return { commands: toAvailableCommands(dshCommandsOf(record)) }
       }
       // Informational grok extensions (bundle status, billing, prompt history,
       // marketplace, session info): empty results keep the pager's auxiliary
@@ -1230,6 +1384,8 @@ export function createAcpAgent(
     // transient stat fails, so the next prompt does not re-align in a loop.
     record.logIdentity = (await logIdentityOf(handle.agent.session)) ?? current
     await replaySession(sessionId, record.agent.session.events)
+    // The fresh agent has its own scoped command view; re-advertise.
+    pushAvailableCommands(record)
   }
 
   /** Replay a session's event log as isReplay notifications. */
@@ -1287,6 +1443,7 @@ export function createAcpAgent(
     disposeClaimed()
     disposeFlush()
     disposeApproval()
+    disposeCommandsChange()
     const records = [...sessions.values()]
     sessions.clear()
     if (questions !== undefined) {
