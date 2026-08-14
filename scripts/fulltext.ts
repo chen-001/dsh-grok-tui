@@ -27,7 +27,7 @@ try {
       /* torn frame */
     }
   }
-  const { meta, events } = scanLog(Buffer.from(text, 'utf8'))
+  const { events } = scanLog(Buffer.from(text, 'utf8'))
   const reasoning: string[] = []
   const answer: string[] = []
   for (const ev of events) {

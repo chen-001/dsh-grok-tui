@@ -9,7 +9,7 @@
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { connect, type Socket } from 'node:net'
+import { connect, } from 'node:net'
 import {
   type Agent as AcpAgent,
   ClientSideConnection,

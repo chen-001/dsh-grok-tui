@@ -89,17 +89,17 @@ function buildTokens(usage) {
   const billed = usage.cacheReadTokens + usage.inputTokens
   const tokens = {}
   if (billed > 0) {
-    tokens['dsh_cache'] = `${((100 * usage.cacheReadTokens) / billed).toFixed(1)}%`
+    tokens.dsh_cache = `${((100 * usage.cacheReadTokens) / billed).toFixed(1)}%`
   }
   const ttft = fmtSeconds(usage.ttftMs)
-  if (ttft) tokens['dsh_ttft'] = ttft
+  if (ttft) tokens.dsh_ttft = ttft
   if (Number.isFinite(usage.tps) && usage.tps > 0) {
-    tokens['dsh_tps'] = `${usage.tps.toFixed(1)}/s`
+    tokens.dsh_tps = `${usage.tps.toFixed(1)}/s`
   }
   const inTokens = fmtTokens(usage.inputTokens)
-  if (inTokens) tokens['dsh_in'] = inTokens
+  if (inTokens) tokens.dsh_in = inTokens
   const outTokens = fmtTokens(usage.outputTokens)
-  if (outTokens) tokens['dsh_out'] = outTokens
+  if (outTokens) tokens.dsh_out = outTokens
   return tokens
 }
 

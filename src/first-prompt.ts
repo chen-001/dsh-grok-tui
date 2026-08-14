@@ -96,7 +96,7 @@ export function encodeSegment(raw: string): string {
     if (ch !== '~' && /^[A-Za-z0-9._-]$/.test(ch)) {
       out += ch
     } else {
-      out += '~' + code.toString(16).toUpperCase().padStart(4, '0')
+      out += `~${code.toString(16).toUpperCase().padStart(4, '0')}`
     }
   }
   return out
@@ -116,7 +116,7 @@ export function projectKey(cwd: string): string {
       readable += ch
       separatorRun = false
     } else {
-      readable += '~' + code.toString(16).toUpperCase().padStart(4, '0')
+      readable += `~${code.toString(16).toUpperCase().padStart(4, '0')}`
       separatorRun = false
     }
   }
@@ -173,6 +173,7 @@ export async function sessionTitleFromLog(
   header: SessionHeader,
 ): Promise<string | undefined> {
   const path = sessionLogPath(root, header.cwd, String(header.id))
+  // biome-ignore lint/suspicious/noImplicitAnyLet: type comes from open() below
   let handle
   try {
     handle = await open(path, 'r')
@@ -247,6 +248,7 @@ export async function firstUserPromptFromLog(
   header: SessionHeader,
 ): Promise<string | undefined> {
   const path = sessionLogPath(root, header.cwd, String(header.id))
+  // biome-ignore lint/suspicious/noImplicitAnyLet: type comes from open() below
   let handle
   try {
     handle = await open(path, 'r')

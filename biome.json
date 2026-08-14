@@ -12,6 +12,9 @@
     "clientKind": "git",
     "useIgnoreFile": true
   },
+  "files": {
+    "includes": ["**", "!dist"]
+  },
   "formatter": {
     "indentStyle": "space"
   },
@@ -28,7 +31,7 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true
+      "preset": "recommended"
     }
   }
 }
