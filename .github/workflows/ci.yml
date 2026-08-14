@@ -28,7 +28,10 @@ jobs:
           cache: pnpm
 
       - name: Install dependencies
-        run: pnpm install
+        # auto-install-peers=false must match the committed lockfile settings
+        # (peer @deepseek-ai/* packages come from the dsh snapshot's tsconfig
+        # paths, never from the registry).
+        run: pnpm install --config.auto-install-peers=false
 
       # The tests import unpublished @deepseek-ai/* workspace packages. They
       # resolve through the tsconfig paths generated from a PINNED dsh
