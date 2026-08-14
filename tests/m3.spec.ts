@@ -13,7 +13,6 @@ import ApprovalService from '@deepseek-ai/dsh-user-approval'
 import UserQuestionsService, {
   UserQuestionError,
 } from '@deepseek-ai/dsh-user-questions'
-import type { AskUserQuestionRequest } from '@deepseek-ai/dsh-user-questions'
 import { afterEach, describe, expect, it } from '@rstest/core'
 import { Context } from 'cordis'
 import { QuestionRouter } from '../src/bridge/question.ts'
@@ -81,17 +80,18 @@ describe('approval bridge', () => {
       client: AcpTestClient
       agent: Agent
     }
+    // biome-ignore lint/style/noNonNullAssertion: harness is owned by this test
     harness!.onPermission = () => ({
       outcome: { outcome: 'selected', optionId: 'allow-once' },
     })
     await expect(
-      harness!.ctx.approval.request({
+      harness?.ctx.approval.request({
         agent,
         toolName: 'bash',
         callId: CallId('call-9'),
       }),
     ).resolves.toBe('allowed-once')
-    expect(harness!.permissionRequests[0]).toMatchObject({
+    expect(harness?.permissionRequests[0]).toMatchObject({
       sessionId: agent.session.id,
       toolCall: { toolCallId: 'call-9' },
       options: [
@@ -100,11 +100,12 @@ describe('approval bridge', () => {
       ],
     })
 
+    // biome-ignore lint/style/noNonNullAssertion: harness is owned by this test
     harness!.onPermission = () => ({
       outcome: { outcome: 'selected', optionId: 'reject-once' },
     })
     await expect(
-      harness!.ctx.approval.request({
+      harness?.ctx.approval.request({
         agent,
         toolName: 'bash',
         callId: CallId('call-9'),
@@ -119,17 +120,18 @@ describe('approval bridge', () => {
       agent: Agent
     }
     await expect(
-      harness!.ctx.approval.request({
+      harness?.ctx.approval.request({
         agent,
         toolName: 'bash',
         callId: CallId('call-9'),
       }),
     ).resolves.toBe('cancelled')
+    // biome-ignore lint/style/noNonNullAssertion: harness is owned by this test
     harness!.onPermission = () => ({
       outcome: { outcome: 'selected', optionId: 'unknown-grant' },
     })
     await expect(
-      harness!.ctx.approval.request({
+      harness?.ctx.approval.request({
         agent,
         toolName: 'bash',
         callId: CallId('call-9'),
@@ -143,11 +145,12 @@ describe('approval bridge', () => {
       client: AcpTestClient
       agent: Agent
     }
+    // biome-ignore lint/style/noNonNullAssertion: harness is owned by this test
     harness!.onPermission = () => {
       throw new Error('client gone')
     }
     await expect(
-      harness!.ctx.approval.request({
+      harness?.ctx.approval.request({
         agent,
         toolName: 'bash',
         callId: CallId('call-9'),
@@ -171,16 +174,16 @@ describe('approval bridge', () => {
       },
     } as unknown as Agent
     await expect(
-      harness!.ctx.approval.request({
+      harness?.ctx.approval.request({
         agent: foreign,
         toolName: 'bash',
         callId: CallId('call'),
       }),
     ).resolves.toBe('unavailable')
     await expect(
-      harness!.ctx.approval.request({ agent, toolName: 'bash' }),
+      harness?.ctx.approval.request({ agent, toolName: 'bash' }),
     ).resolves.toBe('unavailable')
-    expect(harness!.permissionRequests).toHaveLength(0)
+    expect(harness?.permissionRequests).toHaveLength(0)
     client.transport.close()
   })
 })
@@ -259,6 +262,7 @@ describe('question bridge', () => {
       ],
       agent: { session: { id: 'sess-1' } } as never,
     })
+    // biome-ignore lint/correctness/noUnsafeOptionalChaining: seen is asserted non-empty
     expect((seen[0]?.params as { mode: string }).mode).toBe('plan')
   })
 

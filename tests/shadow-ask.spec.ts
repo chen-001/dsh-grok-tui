@@ -77,7 +77,7 @@ describe('scoped shadow ask_user_question', () => {
     const ToolAskUser = await import('@deepseek-ai/dsh-tool-ask-user')
     await harness.ctx.plugin(ToolAskUser)
     const webAnswers: string[] = []
-    harness.ctx.get('userQuestions')!.registerProvider({
+    harness.ctx.get('userQuestions')?.registerProvider({
       ask: async (request) => {
         webAnswers.push(request.questions[0]?.question ?? '')
         return {
@@ -121,6 +121,7 @@ describe('scoped shadow ask_user_question', () => {
     const sessionId = created.sessionId as never
     const grokAgent = harness.ctx.agents.get(sessionId)
     expect(grokAgent).toBeDefined()
+    // biome-ignore lint/style/noNonNullAssertion: guarded by expect above
     const shadowDef = harness.ctx.tools.get('ask_user_question', grokAgent!)
     expect(shadowDef).toBeDefined()
 
@@ -152,7 +153,7 @@ describe('scoped shadow ask_user_question', () => {
 
     // The tool result reached the model: the tool/result event carries the
     // shadow's answer payload.
-    const events = harness.ctx.sessions.get(sessionId)!.events
+    const events = harness.ctx.sessions.get(sessionId)?.events
     const toolResult = events.find(event => event.type === 'tool/result')
     const resultContent = toolResult?.data.message.content
     expect(JSON.stringify(resultContent)).toContain('Yes')
@@ -175,7 +176,7 @@ describe('scoped shadow ask_user_question', () => {
     const ToolAskUser = await import('@deepseek-ai/dsh-tool-ask-user')
     await harness.ctx.plugin(ToolAskUser)
     const webAnswers: string[] = []
-    harness.ctx.get('userQuestions')!.registerProvider({
+    harness.ctx.get('userQuestions')?.registerProvider({
       ask: async (request) => {
         webAnswers.push(request.questions[0]?.question ?? '')
         return {
