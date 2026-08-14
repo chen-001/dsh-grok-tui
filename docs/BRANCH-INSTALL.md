@@ -7,9 +7,13 @@
 ## 目标设备安装（一条命令）
 
 ```bash
-npm install -g github:chen-001/dsh-grok-tui#feat/bridge-only
+npm install -g --legacy-peer-deps github:chen-001/dsh-grok-tui#feat/bridge-only
 ```
 
+- `--legacy-peer-deps` 是必需的：peerDependencies 里的 `@deepseek-ai/*`
+  是未发布的 workspace 包（运行时由 dsh checkout 提供），npm 7+ 严格
+  解析会报 ERESOLVE；该 flag 跳过自动安装 peer 依赖（项目自己的
+  .npmrc 就是这么配的，但目标设备不会读仓库里的 .npmrc）
 - `#` 后面是分支名：`feat/slash-commands`、`feat/bridge-only`、未来的
   `feat/xxx` 都这样装
 - 装的是该分支**当前最新提交**（含已提交的 `dist` 构建产物），每次
@@ -29,7 +33,7 @@ grok-dsh            # 打开 TUI（bridge-only：必须 host 先运行）
 
 ```bash
 npm uninstall -g dsh-grok-tui        # 先卸载旧包（bin 同名 grok-dsh 会冲突）
-npm install -g github:chen-001/dsh-grok-tui#feat/slash-commands
+npm install -g --legacy-peer-deps github:chen-001/dsh-grok-tui#feat/slash-commands
 ```
 
 ## 发布侧流程（本机，每次分支有更新时）

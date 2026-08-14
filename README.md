@@ -47,7 +47,7 @@ Both paths behave identically afterwards (command, automatic herdr sidebar confi
 Testing a branch's build on another machine — one npm command installs straight from the GitHub branch (no public npm publish needed):
 
 ```sh
-npm install -g github:chen-001/dsh-grok-tui#feat/bridge-only   # 例：feat/bridge-only 分支
+npm install -g --legacy-peer-deps github:chen-001/dsh-grok-tui#feat/bridge-only   # 例：feat/bridge-only 分支
 grok-dsh setup                              # 挂进 dsh web profile（每台设备一次 / once per machine）
 dsh web && grok-dsh                         # 先启动 host 再开 TUI / host first, then the TUI
 ```
