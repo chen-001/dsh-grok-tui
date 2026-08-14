@@ -312,6 +312,44 @@ describe('event translation', () => {
     })
   })
 
+  it('translates session titles into session_info_update', () => {
+    const calls = new Map<string, ToolCallRecord>()
+    // `session/title` is a plugin-merged event type (dsh-session-title), so
+    // the SessionEvent union does not carry it; build the event structurally.
+    const titleEvent = {
+      type: 'session/title',
+      seq: 8,
+      time: 1_700_000_000_008,
+      data: {
+        title: 'Fix the flaky test',
+        messageSeqs: [1],
+        source: { kind: 'fallback' },
+      },
+    } as unknown as SessionEvent
+    const updates = translateEvent(SID, titleEvent, calls)
+    expect(updates).toHaveLength(1)
+    expect(updates[0]?.update).toMatchObject({
+      sessionUpdate: 'session_info_update',
+      title: 'Fix the flaky test',
+    })
+    expect(updates[0]?._meta?.eventId).toBe('sess-1-8')
+  })
+
+  it('skips empty session titles', () => {
+    const calls = new Map<string, ToolCallRecord>()
+    const titleEvent = {
+      type: 'session/title',
+      seq: 9,
+      time: 1_700_000_000_009,
+      data: {
+        title: '   ',
+        messageSeqs: [],
+        source: { kind: 'fallback' },
+      },
+    } as unknown as SessionEvent
+    expect(translateEvent(SID, titleEvent, calls)).toEqual([])
+  })
+
   it('stamps the event id meta from the session log sequence', () => {
     const calls = new Map<string, ToolCallRecord>()
     const updates = translateEvent(

@@ -44,16 +44,31 @@
   `extensions/session_admin.rs` 的 `handle_commands_list`（请求带
   kind/sessionId/cwd 参数）。
 
-### F2 · 会话标题上线（session_info_update）
+### F2 · 会话标题上线（session_info_update）✅ 已实现
 
-- **状态**: 待定　**价值**: 高　**成本**: 低
+- **状态**: 已实现（2026-08-14，分支 `feat/session-title`）
+- **价值**: 高　**成本**: 低
 - **现状**: 会话标题不上线（Known Limitations 第 5 条），pager 的标题回退为
   第一条 prompt 文本。
 - **方案**: 监听 DSH 的 `session/title` 事件，通过 `session_info_update` 通知
   把标题推给 pager。仓库已有 `sessionTitleFromLog` 读取器（
   `src/first-prompt.ts`），grok-shell 端 `notify_session_info_update` 已确认
   存在。
-- **依据**: grok-shell `agent/mvp_agent/agent_ops.rs`。
+- **实现**:
+  - `src/translate/events.ts`：`translateEvent` 对 `session/title` 事件返回
+    标准 ACP `session_info_update` 通知（`session/title` 是 dsh-session-title
+    插件合并的事件类型，`SessionEvent` 联合不携带，结构性收窄处理）
+  - `src/acp-server.ts`：`session/event` 监听器对 `session/title` 事件额外
+    发送 `x.ai/session_notification` ExtNotification（`SessionSummaryGenerated`
+    变体）——pager 的 update matcher 忽略标准 `session_info_update`，只消费
+    该扩展通知（设置 `generated_session_title`）；与 grok-shell
+    `notify_client` 的双通道行为一致
+  - 测试：`tests/translate.spec.ts` 2 例（翻译 + 空标题跳过）、
+    `tests/acp.spec.ts` 1 例（双通道端到端）；全套 139 例通过
+- **依据**: grok-shell `agent/mvp_agent/agent_ops.rs`（`notify_session_info_update`）
+  与 `session/summary.rs`（`notify_client` 双通道）；pager
+  `app/acp_handler/session_notification.rs`（`SessionSummaryGenerated` →
+  `generated_session_title`）。
 
 ### F3 · 用量面板增强：TTFT / TPS / 会话切换
 

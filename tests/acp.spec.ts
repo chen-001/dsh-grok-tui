@@ -432,4 +432,66 @@ describe('grok ACP surface', () => {
     ).rejects.toThrow(/turn failed: boom/)
     client.transport.close()
   })
+
+  it('pushes session titles onto the wire on both channels', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'grok-title-'))
+    socketPath = join(dir, 'leader.sock')
+    const harness2 = await makeGrokHarness({
+      socketPath,
+      script: [textResponse('Hello!')],
+    })
+    harness = harness2
+    dispose = harness2.dispose
+    const client = await AcpTestClient.connect(
+      socketPath,
+      recordingClient(harness2),
+    )
+
+    const { sessionId } = await client.client.newSession({
+      cwd: dir,
+      mcpServers: [],
+    })
+    // The host's session-title service appends `session/title` events
+    // (fallback first, then the LLM provider title, then any user rename);
+    // drive one through the live session to exercise the wire path.
+    // `session/title` is a plugin-merged event type (dsh-session-title),
+    // so the SessionEventMap does not carry it — append structurally.
+    const session = harness2.ctx.sessions.get(sessionId)
+    expect(session).toBeDefined()
+    ;(session as unknown as {
+      append(type: string, data: unknown): void
+    }).append('session/title', {
+      title: 'Fix the flaky test',
+      messageSeqs: [1],
+      source: { kind: 'fallback' },
+    })
+
+    // The session/event feed delivers asynchronously; wait for the wire.
+    await pollUntil(() =>
+      harness2.notifications.some(
+        n => n.update.sessionUpdate === 'session_info_update',
+      ),
+    )
+    // The standard ACP notification carries the title...
+    const infoUpdate = harness2.notifications.find(
+      n => n.update.sessionUpdate === 'session_info_update',
+    )
+    expect(infoUpdate?.update).toMatchObject({
+      sessionUpdate: 'session_info_update',
+      title: 'Fix the flaky test',
+    })
+    // ...and the grok extension notification the pager actually consumes
+    // (SessionSummaryGenerated sets the pager's generated_session_title).
+    const ext = harness2.extNotifications.find(
+      n => n.method === 'x.ai/session_notification',
+    )
+    expect(ext?.params).toMatchObject({
+      sessionId: String(sessionId),
+      update: {
+        sessionUpdate: 'session_summary_generated',
+        sessionSummary: 'Fix the flaky test',
+      },
+    })
+    client.transport.close()
+  })
 })

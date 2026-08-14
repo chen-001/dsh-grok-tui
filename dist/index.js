@@ -1016,7 +1016,16 @@ function translateEvent(sessionId, event, calls, replay = false, usage) {
                 }, event, replay, usage)
             ];
         default:
-            return [];
+            {
+                const titleEvent = event;
+                if ('session/title' === titleEvent.type && 'string' == typeof titleEvent.data?.title && titleEvent.data.title.trim().length > 0) return [
+                    events_notification(sessionId, {
+                        sessionUpdate: 'session_info_update',
+                        title: titleEvent.data.title
+                    }, event, replay, usage)
+                ];
+                return [];
+            }
     }
 }
 function createUsageState() {
@@ -1572,6 +1581,14 @@ function createAcpAgent(ctx, config, channel, logger, questions, lastModel) {
             const view = foldUsageWithView(usage, event);
             if (null !== view) notify(buildUsageUpdateNotification(session.header.id, view, event, false));
             for (const update of translateEvent(session.header.id, event, calls, false, view ?? void 0))notify(update);
+            const titleEvent = event;
+            if ('session/title' === titleEvent.type && 'string' == typeof titleEvent.data?.title && titleEvent.data.title.trim().length > 0) connectionRef().extNotification('x.ai/session_notification', {
+                sessionId: String(session.header.id),
+                update: {
+                    sessionUpdate: 'session_summary_generated',
+                    sessionSummary: titleEvent.data.title
+                }
+            });
         } finally{
             const inflight = record.inflight;
             if (void 0 !== inflight && 'turn/end' === event.type && inflight.turn === event.data.turn) if ('error' === event.data.reason.kind) {

@@ -260,7 +260,38 @@ export function translateEvent(
         ),
       ]
     }
-    default:
+    default: {
+      // The host's session-title service appends `session/title` events
+      // (fallback first, then the LLM provider title, then any user rename).
+      // Push the latest title onto the wire as the standard ACP
+      // `session_info_update` so ACP-native clients can relabel the session;
+      // the grok pager consumes the companion `x.ai/session_notification`
+      // (SessionSummaryGenerated) sent by the server for the same event.
+      // `session/title` is a plugin-merged event type (dsh-session-title),
+      // so the SessionEvent union does not carry it — narrow structurally.
+      const titleEvent = event as {
+        type?: unknown
+        data?: { title?: unknown }
+      }
+      if (
+        titleEvent.type === 'session/title' &&
+        typeof titleEvent.data?.title === 'string' &&
+        titleEvent.data.title.trim().length > 0
+      ) {
+        return [
+          notification(
+            sessionId,
+            {
+              sessionUpdate: 'session_info_update',
+              title: titleEvent.data.title,
+            },
+            event,
+            replay,
+            usage,
+          ),
+        ]
+      }
       return []
+    }
   }
 }

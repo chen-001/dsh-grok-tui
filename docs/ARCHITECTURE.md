@@ -297,7 +297,7 @@ append-only.
 - **No auth layer on the leader socket** — the socket path is the only fence; a process client that can reach it can drive the harness. Same posture as the pager's own leader.
 - **Windows named pipes not implemented** — the leader transport is Unix-socket-only; the pager's Windows pipe hash is documented in the grok source for a future port.
 - **`session/load` cursor ignored** — replays the whole transcript; the pager dedups by `eventId`, so this is safe but not optimal for large logs.
-- **`session_info_update` not sent** — session titles stay off the wire (the pager falls back to the first prompt); `usage_update` **is** sent (it drives the context/stats bars, see "Status bar" above).
+- **`session_info_update` sent on `session/title`** — the host's session-title service appends `session/title` events (fallback, then LLM provider title, then user rename); the bridge forwards each as the standard ACP `session_info_update` **and** the grok extension `x.ai/session_notification` (`SessionSummaryGenerated`), which is the channel the pager actually consumes (`generated_session_title`). `usage_update` **is** sent (it drives the context/stats bars, see "Status bar" above).
 - **`extNotification` ignores all `_x.ai/*` notifications** — the pager's telemetry logs are dropped (never forwarded anywhere).
 
 ## DSH command bridge (slash commands in the TUI)

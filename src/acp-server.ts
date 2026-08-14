@@ -705,6 +705,29 @@ export function createAcpAgent(
           view ?? undefined,
         ))
           notify(update)
+        // The grok pager consumes session titles through the extension
+        // `x.ai/session_notification` (SessionSummaryGenerated) — its update
+        // matcher ignores the standard `session_info_update` above. Mirror
+        // grok-shell's notify_client: both channels carry the same title.
+        // `session/title` is a plugin-merged event type (dsh-session-title),
+        // so the SessionEvent union does not carry it — narrow structurally.
+        const titleEvent = event as {
+          type?: unknown
+          data?: { title?: unknown }
+        }
+        if (
+          titleEvent.type === 'session/title' &&
+          typeof titleEvent.data?.title === 'string' &&
+          titleEvent.data.title.trim().length > 0
+        ) {
+          void connectionRef().extNotification('x.ai/session_notification', {
+            sessionId: String(session.header.id),
+            update: {
+              sessionUpdate: 'session_summary_generated',
+              sessionSummary: titleEvent.data.title,
+            },
+          })
+        }
       } finally {
         const inflight = record.inflight
         if (
