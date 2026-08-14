@@ -70,14 +70,25 @@
   `app/acp_handler/session_notification.rs`（`SessionSummaryGenerated` →
   `generated_session_title`）。
 
-### F3 · 用量面板增强：TTFT / TPS / 会话切换
+### F3 · 用量面板增强：TTFT / TPS / 会话切换 ✅ 已实现
 
-- **状态**: 待定　**价值**: 中　**成本**: 低
+- **状态**: 已实现（2026-08-14，分支 `feat/usage-panel-pagination`）
+- **价值**: 中　**成本**: 低
 - **现状**: tmux 用量面板（`scripts/usage-panel.mjs`）只显示
   cache/input/output/total/api/tool 六项；usage view（`src/usage.ts`
   `DshUsageView`）其实已含 `ttftMs`、`tps` 字段（herdr 侧栏在用）。
 - **方案**: 面板补上 TTFT 与 TPS 两行；跟随当前活跃会话（status 文件已有
   sessionId 字段）。
+- **实现**:
+  - `scripts/usage-panel.mjs`：新增 `ttft`（平均首 token 时延，ms/s 格式）
+    与 `tps`（平均输出 token/秒）两行；status 文件始终持有最近活跃会话
+    （bridge 每次通知覆写并盖 sessionId），面板跟随其变化，会话切换时
+    footer 显示 `(switched)` 标记；`renderView`/`fmtDuration`/`fmtTps`
+    导出为纯函数（main guard 保证导入不启动轮询），面板盒子加宽对齐
+  - 测试：`tests/usage-panel.spec.ts` 6 例（TTFT/TPS 行、缺失值兜底
+    `–`、切换标记、无 usage 容错）；全套 151 例通过
+- **依据**: `src/usage.ts` `DshUsageView`（`ttftMs`/`tps` 字段）；
+  `scripts/herdr-usage-watcher.mjs` 的格式化惯例。
 
 ### F4 · 图片粘贴桥接（远期）
 
@@ -89,12 +100,35 @@
   session/prompt 的 image 块解析。
 - **依据**: pager `app/effects/mod.rs` 剪贴板附件探测。
 
-### F5 · resume 列表分页与搜索
+### F5 · resume 列表分页与搜索 ✅ 已实现
 
-- **状态**: 待定　**价值**: 中　**成本**: 中
+- **状态**: 已实现（2026-08-14，分支 `feat/usage-panel-pagination`）
+- **价值**: 中　**成本**: 中
 - **现状**: `x.ai/session/list` 一次返回最多 100 个会话、无分页 cursor
   （`nextCursor: null`）；大 store（数百会话）时 picker 拥挤。
 - **方案**: 研究 pager 的分页协议，实现 cursor 分页。
+- **调研结论**: pager 的 resume picker 只在打开时拉一次
+  `x.ai/session/list`（`limit: 30`），从不发送 cursor、也不消费
+  `nextCursor`（无滚动加载）；但 grok-shell 的 unified_list 协议本身支持
+  cursor 分页（`CompositeCursor`：base64url 编码的
+  `{ boundary: { updated_at, kind, session_id } }`，请求带 `cursor`、
+  响应带 `nextCursor`）。pager 搜索框发 `query` 参数，DSH 侧此前完全忽略。
+- **实现**:
+  - `src/acp-server.ts` `x.ai/session/list`：全路径尊重 `limit`（默认 30，
+    上限 100，不再强制 100 行窗口——picker 显示一页 30 行，不再拥挤）；
+    支持 `cursor` 参数（容错解码，畸形 cursor 回退首页）与 `nextCursor`
+    响应（边界 = 已检查窗口最后一行，死行页也能前进）；支持 `query`
+    搜索（title/firstPrompt/sessionId 大小写不敏感子串，与 grok-shell
+    merge.rs 语义一致）；排序改为全序（lastActive 降序 + sessionId 升序，
+    与 cursor 边界同键）；firstPrompt 读取加 8 并发池（顺带缓解 I5）
+  - 测试：`tests/m4.spec.ts` 6 例（cursor 全量遍历无重复、browse 分页、
+    畸形 cursor 回退、prompt 文本搜索、sessionId 搜索、搜索分页遍历）；
+    全套 151 例通过
+- **依据**: grok-shell `session/unified_list/mod.rs`（`ListReq.cursor`、
+  `merge_and_paginate`、`ext_list_response`）与 `cursor.rs`
+  （`CompositeCursor` 编解码）；`session/merge.rs`（query 匹配语义）；
+  pager `app/effects/mod.rs` `Effect::FetchSessionList`（limit 30、query
+  参数、无 cursor）。
 
 ### F6 · MCP 服务器桥接（远期）
 

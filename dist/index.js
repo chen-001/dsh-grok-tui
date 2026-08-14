@@ -1886,8 +1886,12 @@ function createAcpAgent(ctx, config, channel, logger, questions, lastModel) {
                 if (void 0 === persistence) return {
                     sessions: []
                 };
-                const requested = params.limit;
-                const limit = Math.max(100, 'number' == typeof requested ? requested : 30);
+                const listParams = params;
+                const requested = 'number' == typeof listParams.limit ? listParams.limit : void 0;
+                const cursor = 'string' == typeof listParams.cursor ? listParams.cursor : void 0;
+                const metaQuery = listParams._meta?.['x.ai/query'];
+                const query = 'string' == typeof listParams.query ? listParams.query : 'string' == typeof metaQuery ? metaQuery : void 0;
+                const pageSize = Math.min(100, Math.max(1, requested ?? 30));
                 const archived = void 0 === config.storageRoot ? new Set() : await readArchivedSessionIds(config.storageRoot);
                 const headers = [
                     ...await persistence.list()
@@ -1904,34 +1908,67 @@ function createAcpAgent(ctx, config, channel, logger, questions, lastModel) {
                         lastActive
                     };
                 }));
-                ranked.sort((a, b)=>b.lastActive - a.lastActive);
-                const sessions = [];
-                for (const { header, lastActive } of ranked.slice(0, limit)){
-                    const firstPrompt = void 0 === config.persistenceRoot ? await firstUserPrompt(persistence, header) : await firstUserPromptFromLog(config.persistenceRoot, header) ?? await firstUserPrompt(persistence, header);
-                    if (void 0 === firstPrompt) continue;
-                    const autoTitle = void 0 === config.persistenceRoot ? void 0 : await sessionTitleFromLog(config.persistenceRoot, header);
-                    const title = autoTitle ?? firstPrompt;
-                    const iso = (ms)=>new Date(ms).toISOString();
-                    sessions.push({
-                        sessionId: String(header.id),
-                        cwd: header.cwd ?? '',
-                        createdAt: iso(header.createdAt),
-                        updatedAt: iso(lastActive),
-                        summary: title,
+                ranked.sort((a, b)=>{
+                    if (b.lastActive !== a.lastActive) return b.lastActive - a.lastActive;
+                    const ai = String(a.header.id);
+                    const bi = String(b.header.id);
+                    return ai < bi ? -1 : ai > bi ? 1 : 0;
+                });
+                const boundary = decodeListCursor(cursor);
+                const candidates = void 0 === boundary ? ranked : ranked.filter(({ header, lastActive })=>{
+                    if (lastActive < boundary.updatedAtMs) return true;
+                    if (lastActive > boundary.updatedAtMs) return false;
+                    return String(header.id) > boundary.sessionId;
+                });
+                const readRow = async (row)=>{
+                    const firstPrompt = void 0 === config.persistenceRoot ? await firstUserPrompt(persistence, row.header) : await firstUserPromptFromLog(config.persistenceRoot, row.header) ?? await firstUserPrompt(persistence, row.header);
+                    const autoTitle = void 0 === config.persistenceRoot ? void 0 : await sessionTitleFromLog(config.persistenceRoot, row.header);
+                    return {
+                        header: row.header,
+                        lastActive: row.lastActive,
                         firstPrompt,
+                        title: autoTitle ?? firstPrompt
+                    };
+                };
+                const toWireRow = (row)=>{
+                    const iso = (ms)=>new Date(ms).toISOString();
+                    return {
+                        sessionId: String(row.header.id),
+                        cwd: row.header.cwd ?? '',
+                        createdAt: iso(row.header.createdAt),
+                        updatedAt: iso(row.lastActive),
+                        summary: row.title,
+                        firstPrompt: row.firstPrompt,
                         hostname: hostname(),
                         source: 'local',
-                        title,
+                        title: row.title,
                         _meta: {
                             'x.ai/session': {
                                 kind: 'chat'
                             }
                         }
-                    });
+                    };
+                };
+                let sessions;
+                let nextCursor;
+                if (void 0 !== query) {
+                    const q = query.toLowerCase();
+                    const enriched = await mapWithConcurrency(candidates, 8, readRow);
+                    const matched = enriched.filter((row)=>void 0 !== row.firstPrompt && (String(row.header.id).toLowerCase().includes(q) || (row.title ?? '').toLowerCase().includes(q) || row.firstPrompt.toLowerCase().includes(q)));
+                    const window = matched.slice(0, pageSize);
+                    sessions = window.map(toWireRow);
+                    const last = window.at(-1);
+                    nextCursor = void 0 !== last && matched.length > pageSize ? encodeListCursor(last.lastActive, String(last.header.id)) : null;
+                } else {
+                    const window = candidates.slice(0, pageSize);
+                    const enriched = await mapWithConcurrency(window, 8, readRow);
+                    sessions = enriched.filter((row)=>void 0 !== row.firstPrompt).map(toWireRow);
+                    const last = window.at(-1);
+                    nextCursor = void 0 !== last && candidates.length > pageSize ? encodeListCursor(last.lastActive, String(last.header.id)) : null;
                 }
                 return {
                     sessions,
-                    nextCursor: null,
+                    nextCursor,
                     _meta: {
                         'x.ai/listScope': 'all'
                     },
@@ -2212,6 +2249,47 @@ async function firstUserPrompt(persistence, header) {
             if (text.length > 0) return text;
         }
     } catch  {}
+}
+function decodeListCursor(raw) {
+    if (void 0 === raw || '' === raw) return;
+    try {
+        const parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
+        const boundary = parsed?.boundary;
+        if (void 0 === boundary || 'string' != typeof boundary.session_id) return;
+        const updatedAtMs = Date.parse(String(boundary.updated_at));
+        if (!Number.isFinite(updatedAtMs)) return;
+        return {
+            updatedAtMs,
+            sessionId: boundary.session_id
+        };
+    } catch  {
+        return;
+    }
+}
+function encodeListCursor(lastActiveMs, sessionId) {
+    const payload = {
+        boundary: {
+            updated_at: new Date(lastActiveMs).toISOString(),
+            kind: 'chat',
+            session_id: sessionId
+        }
+    };
+    return Buffer.from(JSON.stringify(payload)).toString('base64url');
+}
+async function mapWithConcurrency(items, concurrency, fn) {
+    const results = new Array(items.length);
+    let next = 0;
+    const workers = Array.from({
+        length: Math.min(concurrency, items.length)
+    }, async ()=>{
+        while(next < items.length){
+            const index = next++;
+            const item = items[index];
+            if (void 0 !== item) results[index] = await fn(item);
+        }
+    });
+    await Promise.all(workers);
+    return results;
 }
 function toGrokQuestion(item) {
     return {

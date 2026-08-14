@@ -609,3 +609,147 @@ describe('x.ai/session/list (resume picker)', () => {
     client.transport.close()
   })
 })
+
+describe('x.ai/session/list pagination and search', () => {
+  interface ListResponse {
+    sessions?: Array<{ sessionId: string; firstPrompt: string }>
+    nextCursor?: string | null
+  }
+
+  /** Create `n` persisted sessions with distinct first prompts. */
+  async function makeCatalog(
+    n: number,
+  ): Promise<{ client: AcpTestClient; sessionIds: string[] }> {
+    const dir = await mkdtemp(join(tmpdir(), 'grok-page-'))
+    socketPath = join(dir, 'leader.sock')
+    harness = await makeGrokHarness({
+      socketPath,
+      script: Array.from({ length: n }, () => textResponse('ok')),
+    })
+    dispose = harness.dispose
+    // JSONL persistence so sessions materialize for the catalog.
+    const { default: SessionPersistenceJsonl } = await import(
+      '@deepseek-ai/dsh-session-persistence-jsonl',
+    )
+    await harness.ctx.plugin(SessionPersistenceJsonl, {
+      root: join(dir, 'sessions'),
+      compression: 'none',
+    })
+    const client = await AcpTestClient.connect(
+      socketPath,
+      recordingClient(harness),
+    )
+    await client.client.initialize({ protocolVersion: 1 })
+    const sessionIds: string[] = []
+    for (let i = 0; i < n; i++) {
+      const { sessionId } = await client.client.newSession({
+        cwd: dir,
+        mcpServers: [],
+      })
+      sessionIds.push(sessionId)
+      await client.client.prompt({
+        sessionId,
+        prompt: [{ type: 'text', text: `prompt number ${i}` }],
+      })
+    }
+    // The JSONL coordinator drains asynchronously; settle before listing.
+    await new Promise(resolve => setTimeout(resolve, 300))
+    return { client, sessionIds }
+  }
+
+  async function listPage(
+    client: AcpTestClient,
+    params: Record<string, unknown>,
+  ): Promise<ListResponse> {
+    return (await client.client.extMethod('x.ai/session/list', {
+      cwd: '/tmp',
+      ...params,
+    })) as ListResponse
+  }
+
+  it('walks the whole catalog with cursor pages, no duplicates', async () => {
+    const { client, sessionIds } = await makeCatalog(5)
+    const expected = new Set(sessionIds)
+    const seen: string[] = []
+    let cursor: string | null | undefined
+    let pages = 0
+    do {
+      const page = await listPage(client, {
+        limit: 2,
+        ...(cursor === undefined ? {} : { cursor }),
+      })
+      expect(page.sessions?.length).toBeLessThanOrEqual(2)
+      for (const row of page.sessions ?? []) seen.push(row.sessionId)
+      cursor = page.nextCursor
+      pages += 1
+      expect(pages).toBeLessThanOrEqual(10)
+    } while (cursor !== null && cursor !== undefined)
+    expect(new Set(seen).size).toBe(seen.length)
+    expect(new Set(seen)).toEqual(expected)
+    expect(pages).toBe(3)
+    client.transport.close()
+  })
+
+  it('a plain browse honors the page size and reports nextCursor', async () => {
+    const { client, sessionIds } = await makeCatalog(5)
+    // The pager's default page (30) covers the whole catalog here.
+    const page = await listPage(client, { limit: 30 })
+    expect(page.sessions?.length).toBe(5)
+    expect(page.nextCursor).toBeNull()
+    // A small explicit limit pages.
+    const small = await listPage(client, { limit: 2 })
+    expect(small.sessions?.length).toBe(2)
+    expect(small.nextCursor).not.toBeNull()
+    const all = new Set(sessionIds)
+    for (const row of small.sessions ?? []) {
+      expect(all.has(row.sessionId)).toBe(true)
+    }
+    client.transport.close()
+  })
+
+  it('a malformed cursor falls back to the first page', async () => {
+    const { client } = await makeCatalog(3)
+    const page = await listPage(client, { limit: 2, cursor: 'not-base64!!!' })
+    expect(page.sessions?.length).toBe(2)
+    expect(page.nextCursor).not.toBeNull()
+    client.transport.close()
+  })
+
+  it('search filters by first prompt text, case-insensitive', async () => {
+    const { client, sessionIds } = await makeCatalog(3)
+    const page = await listPage(client, { limit: 30, query: 'PROMPT NUMBER 1' })
+    expect(page.sessions?.map(row => row.sessionId)).toEqual([sessionIds[1]])
+    expect(page.nextCursor).toBeNull()
+    client.transport.close()
+  })
+
+  it('search matches the session id', async () => {
+    const { client, sessionIds } = await makeCatalog(3)
+    const needle = sessionIds[2].slice(0, 8)
+    const page = await listPage(client, { limit: 30, query: needle })
+    expect(page.sessions?.map(row => row.sessionId)).toEqual([sessionIds[2]])
+    client.transport.close()
+  })
+
+  it('search honors the page size and walks with a cursor', async () => {
+    const { client, sessionIds } = await makeCatalog(5)
+    // Every prompt contains "number", so the query matches all five.
+    const seen: string[] = []
+    let cursor: string | null | undefined
+    let pages = 0
+    do {
+      const page = await listPage(client, {
+        limit: 2,
+        query: 'number',
+        ...(cursor === undefined ? {} : { cursor }),
+      })
+      for (const row of page.sessions ?? []) seen.push(row.sessionId)
+      cursor = page.nextCursor
+      pages += 1
+      expect(pages).toBeLessThanOrEqual(10)
+    } while (cursor !== null && cursor !== undefined)
+    expect(new Set(seen)).toEqual(new Set(sessionIds))
+    expect(seen.length).toBe(5)
+    client.transport.close()
+  })
+})

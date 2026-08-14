@@ -1221,10 +1221,18 @@ export function createAcpAgent(
         // (x.ai/session/list); DSH serves the persisted sessions. Sessions
         // without a usable first user prompt are skipped — the picker drops
         // them anyway. The store is shared with the DSH Web UI, so the catalog
-        // can far exceed the pager's 30-row page: serve up to 100 and rank by
-        // LAST activity (log mtime), not creation time — otherwise the web
-        // sessions (older by creation) vanish below the grok-dsh ones.
-        // Sessions the user archived in the web UI stay out of the catalog.
+        // can far exceed the pager's 30-row page; rank by LAST activity (log
+        // mtime), not creation time — otherwise the web sessions (older by
+        // creation) vanish below the grok-dsh ones. Sessions the user archived
+        // in the web UI stay out of the catalog.
+        //
+        // Pagination follows the grok-shell unified_list wire protocol
+        // (xai-grok-shell session/unified_list): the request may carry
+        // `cursor` (base64url CompositeCursor) and `query`; the response
+        // returns `nextCursor` when more rows remain. The pager fetches once
+        // (limit 30) and never walks the cursor, so the picker shows one page
+        // (30 rows — no longer the crowded 100-row window) and its search box
+        // (the `query` param) reaches the rest of the catalog.
         const persistence = ctx.get('sessionPersistence') as
           | {
             list(signal?: AbortSignal): Promise<SessionHeader[]>
@@ -1235,14 +1243,26 @@ export function createAcpAgent(
           }
           | undefined
         if (persistence === undefined) return { sessions: [] }
-        const requested = (params as { limit?: unknown }).limit
-        // The pager pages at 30, but the shared store holds far more and we
-        // serve the whole catalog in one response (no next-cursor paging), so
-        // never truncate below the full catalog size.
-        const limit = Math.max(
-          100,
-          typeof requested === 'number' ? requested : 30,
-        )
+        const listParams = params as {
+          limit?: unknown
+          cursor?: unknown
+          query?: unknown
+          _meta?: { 'x.ai/query'?: unknown }
+        }
+        const requested =
+          typeof listParams.limit === 'number' ? listParams.limit : undefined
+        const cursor =
+          typeof listParams.cursor === 'string' ? listParams.cursor : undefined
+        const metaQuery = listParams._meta?.['x.ai/query']
+        const query =
+          typeof listParams.query === 'string'
+            ? listParams.query
+            : typeof metaQuery === 'string'
+              ? metaQuery
+              : undefined
+        // Honor the requested page size in every mode (pager default 30),
+        // capped so a huge store never forces an unbounded response.
+        const pageSize = Math.min(100, Math.max(1, requested ?? 30))
         const archived =
           config.storageRoot === undefined
             ? new Set<string>()
@@ -1271,48 +1291,117 @@ export function createAcpAgent(
             return { header, lastActive }
           }),
         )
-        ranked.sort((a, b) => b.lastActive - a.lastActive)
-        const sessions: Array<Record<string, unknown>> = []
-        for (const { header, lastActive } of ranked.slice(0, limit)) {
+        // Total order (lastActive desc, sessionId asc) — the same key the
+        // cursor boundary walks, so pages never overlap or skip.
+        ranked.sort((a, b) => {
+          if (b.lastActive !== a.lastActive) return b.lastActive - a.lastActive
+          const ai = String(a.header.id)
+          const bi = String(b.header.id)
+          return ai < bi ? -1 : ai > bi ? 1 : 0
+        })
+        const boundary = decodeListCursor(cursor)
+        const candidates =
+          boundary === undefined
+            ? ranked
+            : ranked.filter(({ header, lastActive }) => {
+              if (lastActive < boundary.updatedAtMs) return true
+              if (lastActive > boundary.updatedAtMs) return false
+              return String(header.id) > boundary.sessionId
+            })
+        const readRow = async (row: {
+          header: SessionHeader
+          lastActive: number
+        }): Promise<{
+          header: SessionHeader
+          lastActive: number
+          firstPrompt: string | undefined
+          title: string | undefined
+        }> => {
           const firstPrompt =
             config.persistenceRoot === undefined
-              ? await firstUserPrompt(persistence, header)
+              ? await firstUserPrompt(persistence, row.header)
               : ((await firstUserPromptFromLog(
                 config.persistenceRoot,
-                header,
-              )) ?? (await firstUserPrompt(persistence, header)))
-          if (firstPrompt === undefined) continue
-          // The automatic session title (fallback then LLM-generated, written
-          // as session/title events by the host's session-title service) is
-          // the picker's row label — same as the web UI. Fall back to the raw
-          // first prompt when the title events are outside the scan budget.
+                row.header,
+              )) ?? (await firstUserPrompt(persistence, row.header)))
           const autoTitle =
             config.persistenceRoot === undefined
               ? undefined
-              : await sessionTitleFromLog(config.persistenceRoot, header)
-          const title = autoTitle ?? firstPrompt
-          const iso = (ms: number): string => new Date(ms).toISOString()
-          sessions.push({
-            sessionId: String(header.id),
-            cwd: header.cwd ?? '',
-            createdAt: iso(header.createdAt),
-            updatedAt: iso(lastActive),
-            summary: title,
+              : await sessionTitleFromLog(config.persistenceRoot, row.header)
+          return {
+            header: row.header,
+            lastActive: row.lastActive,
             firstPrompt,
+            title: autoTitle ?? firstPrompt,
+          }
+        }
+        const toWireRow = (row: {
+          header: SessionHeader
+          lastActive: number
+          firstPrompt: string | undefined
+          title: string | undefined
+        }): Record<string, unknown> => {
+          const iso = (ms: number): string => new Date(ms).toISOString()
+          return {
+            sessionId: String(row.header.id),
+            cwd: row.header.cwd ?? '',
+            createdAt: iso(row.header.createdAt),
+            updatedAt: iso(row.lastActive),
+            summary: row.title,
+            firstPrompt: row.firstPrompt,
             hostname: hostname(),
             source: 'local',
-            title,
+            title: row.title,
             // kind=chat routes the picker straight to session/load: for
             // non-chat entries the pager first looks the session up in ITS
             // local store and shows "Session not found locally" without ever
             // asking the agent. DSH sessions live in DSH persistence, so the
             // conversation lane (agent-backed restore) is the correct path.
             _meta: { 'x.ai/session': { kind: 'chat' } },
-          })
+          }
+        }
+        let sessions: Array<Record<string, unknown>>
+        let nextCursor: string | null
+        if (query !== undefined) {
+          // Search: the pager's picker search sends `query`; match the same
+          // fields grok-shell searches (summary/display title, first prompt,
+          // session id), case-insensitive. The whole candidate set must be
+          // enriched before filtering so the page is not starved by matches
+          // below the window.
+          const q = query.toLowerCase()
+          const enriched = await mapWithConcurrency(candidates, 8, readRow)
+          const matched = enriched.filter(
+            row =>
+              row.firstPrompt !== undefined &&
+              (String(row.header.id).toLowerCase().includes(q) ||
+                (row.title ?? '').toLowerCase().includes(q) ||
+                row.firstPrompt.toLowerCase().includes(q)),
+          )
+          const window = matched.slice(0, pageSize)
+          sessions = window.map(toWireRow)
+          const last = window.at(-1)
+          nextCursor =
+            last !== undefined && matched.length > pageSize
+              ? encodeListCursor(last.lastActive, String(last.header.id))
+              : null
+        } else {
+          // Browse: enrich only the examined window; rows without a usable
+          // first prompt are dropped. The cursor boundary is the LAST EXAMINED
+          // row (not the last emitted) so a page of dead rows still advances.
+          const window = candidates.slice(0, pageSize)
+          const enriched = await mapWithConcurrency(window, 8, readRow)
+          sessions = enriched
+            .filter(row => row.firstPrompt !== undefined)
+            .map(toWireRow)
+          const last = window.at(-1)
+          nextCursor =
+            last !== undefined && candidates.length > pageSize
+              ? encodeListCursor(last.lastActive, String(last.header.id))
+              : null
         }
         return {
           sessions,
-          nextCursor: null,
+          nextCursor,
           // All-scope: the picker treats the catalog as directory-wide and
           // renders the correct empty notice; without this the pager assumes
           // a cwd-scoped browse. `meta` mirrors the grok-shell spelling.
@@ -1865,4 +1954,76 @@ async function firstUserPrompt(
     // An unreadable log must not fail the whole catalog.
   }
   return undefined
+}
+
+/**
+ * Decode an `x.ai/session/list` cursor into the boundary it walks.
+ *
+ * Wire format is the grok-shell unified_list `CompositeCursor` (base64url of
+ * `{ boundary: { updated_at, kind, session_id } }`); DSH sessions are all
+ * kind=chat and there is no conversations lane, so only the boundary matters.
+ * A malformed or empty cursor decodes to `undefined` — a fresh first page,
+ * matching grok-shell's tolerant decode.
+ */
+function decodeListCursor(
+  raw: string | undefined,
+): { updatedAtMs: number; sessionId: string } | undefined {
+  if (raw === undefined || raw === '') return undefined
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(raw, 'base64url').toString('utf8'),
+    ) as { boundary?: { updated_at?: unknown; session_id?: unknown } }
+    const boundary = parsed?.boundary
+    if (boundary === undefined || typeof boundary.session_id !== 'string') {
+      return undefined
+    }
+    const updatedAtMs = Date.parse(String(boundary.updated_at))
+    if (!Number.isFinite(updatedAtMs)) return undefined
+    return { updatedAtMs, sessionId: boundary.session_id }
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Encode the next-page cursor for `x.ai/session/list`: the boundary is the
+ * last row of the EXAMINED window (lastActive desc, sessionId asc), so a page
+ * whose rows were all dropped (no usable first prompt) still advances.
+ */
+function encodeListCursor(lastActiveMs: number, sessionId: string): string {
+  const payload = {
+    boundary: {
+      updated_at: new Date(lastActiveMs).toISOString(),
+      kind: 'chat',
+      session_id: sessionId,
+    },
+  }
+  return Buffer.from(JSON.stringify(payload)).toString('base64url')
+}
+
+/**
+ * Map `items` through an async `fn` with a bounded concurrency pool — the
+ * session catalog can be large, and unbounded `Promise.all` fan-out would
+ * open a file descriptor per session (see PROPOSALS I5).
+ */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array<R>(items.length)
+  let next = 0
+  const workers = Array.from(
+    { length: Math.min(concurrency, items.length) },
+    async () => {
+      while (next < items.length) {
+        const index = next++
+        // `next` never passes `items.length`, so the element is always there.
+        const item = items[index]
+        if (item !== undefined) results[index] = await fn(item)
+      }
+    },
+  )
+  await Promise.all(workers)
+  return results
 }
