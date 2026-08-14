@@ -155,7 +155,14 @@ await ctx.plugin({
         }
       },
     )
-    GrokServer.apply(inner, { socketPath, provider: 'mock', model: 'mock' })
+    GrokServer.apply(inner, {
+      socketPath,
+      provider: 'mock',
+      model: 'mock',
+      // The bridge defaults to host mode (no provider registration) since
+      // v0.5.0; this demo owns the slot and opts in.
+      userInteractionProvider: true,
+    })
   },
 })
 console.log(

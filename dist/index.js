@@ -2714,7 +2714,7 @@ function apply(ctx, config) {
         current: readLastModel(config)
     };
     const userQuestions = ctx.get('userQuestions');
-    const registerAsProvider = config.userInteractionProvider ?? true;
+    const registerAsProvider = config.userInteractionProvider ?? false;
     let disposeProvider;
     if (void 0 !== userQuestions && registerAsProvider) try {
         disposeProvider = userQuestions.registerProvider({
@@ -2722,7 +2722,7 @@ function apply(ctx, config) {
         });
     } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
-        if (detail.includes('DUPLICATE_PROVIDER')) logger.warn("grok-server: user-questions provider slot is already taken by another UI — grok questions keep riding the scoped shadow ask tools; the standalone provider registration was skipped");
+        if (detail.includes('DUPLICATE_PROVIDER')) logger.warn("grok-server: user-questions provider slot is already taken by another UI — grok questions keep riding the scoped shadow ask tools; the provider registration was skipped");
         else throw error;
     }
     else if (void 0 !== userQuestions && !registerAsProvider) logger.info("grok-server: official-host mode (userInteractionProvider: false) — grok questions ride the scoped shadow ask tools; the web dialog serves web sessions");
@@ -2823,7 +2823,7 @@ function apply(ctx, config) {
             for (const connection of connections)connection.dispose();
         }, 'grok-server.server');
     let healthWatch;
-    if (void 0 !== config.persistenceRoot && (config.healthWatch ?? true)) {
+    if (void 0 !== config.persistenceRoot && (config.healthWatch ?? false)) {
         healthWatch = startSessionHealthWatch({
             root: config.persistenceRoot,
             ...void 0 === config.healthCheckIntervalMs ? {} : {

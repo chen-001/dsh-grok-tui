@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
- * Profile hookup for the grok-server bridge (used by install.sh, not a
- * standalone CLI): makes `dsh web` carry the grok TUI bridge with no extra
+ * Profile hookup for the grok-server bridge (used by install.sh and
+ * `grok-dsh setup`, not a user-facing CLI): makes `dsh web` carry the grok
+ * TUI bridge with no extra
  * flags by wiring the plugin into the user's web profile —
  * `$DSH_HOME/profiles/<profile>/`.
  *

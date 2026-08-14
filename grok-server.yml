@@ -4,7 +4,7 @@
 # plugin listens on the grok leader socket inside the SAME process that owns
 # ctx.sessions / ctx.agents / the session store, so browser tabs and grok
 # windows share one live agent per session and one seq counter — interleaved
-# session logs (the old two-daemon architecture's seq gaps) become
+# session logs (the retired two-process architecture's seq gaps) become
 # structurally impossible.
 #
 # Two mounting paths (both need the package resolvable from the profile; see
@@ -14,7 +14,7 @@
 #   2. Temporary load: `dsh web --patch research/dsh-grok-tui/grok-server.yml`.
 #
 # Config notes:
-#   - provider/model/effort match the standalone daemon defaults; the model
+#   - provider/model/effort select the initial agent target; the model
 #     picker in the TUI can still switch per session, and the pager's last
 #     choice persists to $DSH_HOME/grok-last-model.
 #   - persistenceRoot/storageRoot point at the host's own shared store so the
@@ -27,7 +27,7 @@
 #     user-interaction provider slot (its browser question dialog); a second
 #     registration fails the whole plugin tree with DUPLICATE_PROVIDER. Until
 #     the scoped shadow ask tool lands (phase 1), grok questions fall through
-#     to the web dialog. The standalone daemon defaults to true.
+#     to the web dialog. Non-host compositions opt in explicitly.
 #   - socketPath deliberately avoids the official grok CLI's leader path
 #     (~/.grok/leader.sock): a standalone original grok TUI spawns its own
 #     leader process there, and the grok-dsh host probe must never mistake

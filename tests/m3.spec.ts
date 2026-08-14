@@ -326,7 +326,9 @@ describe('question wiring through the provider seam', () => {
       name: 'grok-server-provider-test',
       inject: [...GrokServer.inject],
       apply: (inner: Context) => {
-        GrokServer.apply(inner, { socketPath })
+        // The bridge defaults to host mode (no provider registration) since
+        // v0.5.0; this test owns the slot and opts in.
+        GrokServer.apply(inner, { socketPath, userInteractionProvider: true })
       },
     })
     // The plugin's router provider answers with a typed no-client error.

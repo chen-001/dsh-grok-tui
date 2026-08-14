@@ -17,27 +17,22 @@ tool registry, model routing, session persistence, approvals, sandbox —
 stays in DSH; grok-shell code never runs (the pager binary links it, but in
 leader mode it connects to this server instead of spawning its own agent).
 
-## Install layout (stable dir + live dsh resolution)
+## Install layout (stable dir + web profile hookup)
 
 The plugin is installed into a STABLE directory (`~/.dsh/dsh-grok-tui`),
-**not** inside the dsh checkout. The backend (`scripts/serve-real.ts`)
-imports unpublished `@deepseek-ai/*` workspace packages plus `cordis`; on
-every `grok-dsh` launch, `scripts/grok-dsh.sh` resolves the ACTIVE dsh
-checkout (`~/.dsh/source/current`) and runs the server through the
-checkout's tsx ESM hook with `TSX_TSCONFIG_PATH` set to the checkout's
-`tsconfig.json` — the exact mechanism the dsh launcher itself uses, so
-`@deepseek-ai/*` and `cordis` resolve through the checkout's tsconfig paths
-while the plugin's own npm-installed deps (`@agentclientprotocol/sdk`,
-`schemastery`) come from the plugin's `node_modules`. Resolution therefore
-always follows the currently installed dsh:
+**not** inside the dsh checkout. `grok-dsh setup` (or `install.sh`) wires it
+into the web profile (`~/.dsh/profiles/web`): the `grok-server` row is
+inserted into `cordis.patch.yml` and the package is symlinked into the
+profile's `node_modules`, so `dsh web` mounts the plugin INSIDE the host
+process (the built `dist/index.js` bundle, resolved through the profile's
+node_modules). The launcher itself never runs a backend — it only probes the
+host's leader socket and starts the TUI.
 
-- upgrading dsh (its installer repoints `current` at a fresh worktree) needs
-  **no re-install** — the next launch re-resolves against the new checkout;
-- the plugin's own deps are versioned by the plugin alone.
-
-`DSH_CURRENT` overrides the checkout location. On systems without `setsid`
-(macOS), the backend daemon is detached with `nohup` instead; both keep the
-daemon alive after the wrapper exits.
+- upgrading dsh needs **no re-install** — the profile hookup survives; the
+  plugin's own deps are versioned by the plugin alone;
+- the standalone backend (`scripts/serve-real.ts`, which resolved
+  `@deepseek-ai/*` through the active dsh checkout's tsx hook) was removed
+  in v0.5.0.
 
 ## The pager binary (status bar)
 
@@ -73,29 +68,26 @@ DSH_PATH=/absolute/path/to/dsh pnpm run build
 
 ## Running
 
-One command (recommended): `grok-dsh` (or `scripts/grok-dsh.sh`). **Every
-invocation owns its own backend** — a dedicated server process and socket
-plus its own TUI — exactly like other AI-agent CLIs: windows never share a
-backend, and closing a window (Ctrl+C or `/exit`) stops that window's
-backend. History is still shared across windows: sessions persist to one
-store, so `/resume` in any window can restore sessions created by any other
-window.
+**Bridge-only since v0.5.0**: `grok-dsh` (or `scripts/grok-dsh.sh`) connects
+the TUI to the leader socket of a RUNNING official `dsh web` host — a peer of
+the browser tabs, sharing one live agent per session. No backend is started
+by the launcher; without a running host it fails with instructions. The
+standalone backend (`scripts/serve-real.ts`) was removed in v0.5.0.
 
 ```bash
 alias grok-dsh=/path/to/dsh-grok-tui/scripts/grok-dsh.sh
-grok-dsh           # start THIS window's backend + open the TUI
-grok-dsh stop      # stop ALL grok-dsh backends
-grok-dsh status    # this window's backend status + grok binary version
-grok-dsh restart   # stop + start this window's backend
+dsh web            # start the official host (carries the grok bridge)
+grok-dsh           # open the TUI on the host's leader socket
+grok-dsh status    # host bridge status + grok binary version
+grok-dsh setup     # wire the bridge into the web profile (idempotent)
 ```
 
-A new model chosen in the TUI is remembered (`/tmp/dsh-grok-last-model`):
-the next window and the next server start use it instead of the configured
+A new model chosen in the TUI is remembered (`~/.dsh/grok-last-model`):
+the next window and the next host start use it instead of the configured
 default.
 
 The TUI (and each session's working directory) stays in the directory where
-you ran `grok-dsh` — run it from a project folder and the agent works there;
-only the backend daemon itself lives in the plugin directory.
+you ran `grok-dsh` — run it from a project folder and the agent works there.
 
 ### Session history and workspaces
 
@@ -329,10 +321,8 @@ them to the pager:
   pager as a single assistant message; `session/cancel` aborts an in-flight
   execution.
 - **Service availability**: the commands service is duck-typed through
-  `ctx.get('commands')`. The official host mounts it (web profile); the
-  standalone daemon mounts `dsh-commands` + `dsh-command-goal` in
-  `scripts/serve-real.ts`. Absent service = no menu entries and no
-  interception.
+  `ctx.get('commands')`. The official host mounts it (web profile). Absent
+  service = no menu entries and no interception.
 
 ## Development
 

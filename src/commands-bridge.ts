@@ -27,9 +27,9 @@
  *    pager as a single assistant message.
  *
  * The commands service is duck-typed (`ctx.get('commands')`): the host's
- * `@deepseek-ai/dsh-commands` is not a declared peer dependency, and the
- * standalone daemon mounts it in `scripts/serve-real.ts`. Absent service =
- * no menu entries and no interception (prompts flow to the model untouched).
+ * `@deepseek-ai/dsh-commands` is not a declared peer dependency. The official
+ * host mounts it (web profile); a composition without it gets no menu
+ * entries and no interception (prompts flow to the model untouched).
  * @module dsh-grok-tui/commands-bridge
  */
 

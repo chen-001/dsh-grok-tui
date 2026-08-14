@@ -34,7 +34,8 @@ Host-mode specifics to re-verify on upgrade:
   out-of-continuation appends ("append seq mismatch") — both are the
   structural guarantees that make dual-frontend sharing safe in-process.
 - **Workspace attach in-process**: `ctx.workspace.resolveByPath/create +
-  attachSession` (the webPort HTTP path remains the daemon-mode fallback).
+  attachSession` (the webPort HTTP path remains the fallback for hosts
+  without the in-process workspace service).
 
 ## Version pins (verified 2026-08-07)
 
@@ -140,7 +141,7 @@ TypeScript surfaces these changes at rebuild time; fixes are mechanical.
    (`scripts/verify-host-bridge.mts` — leader handshake, web/grok alternating
    rounds, zero seq gaps) and the shadow-ask live check
    (`scripts/verify-shadow-live.mts`), plus a real permission-dialog pass in
-   the standalone daemon (`scripts/serve-real.ts` + manual TUI).
+   a manual TUI pass against the running host.
 4. If the host is deployed via install.sh's profile hookup, re-run
    `install.sh` (idempotent) and restart `dsh web` so the bridge reloads
    against the new host.

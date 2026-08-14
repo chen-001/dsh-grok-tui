@@ -42,22 +42,21 @@ Both paths behave identically afterwards (command, automatic herdr sidebar confi
 
 ## 使用 / Usage
 
-先启动官方 host（推荐），再打开 TUI：
+**桥接模式（唯一模式，v0.5.0 起）**：先启动官方 host，再打开 TUI。没有运行中的 `dsh web` 时 `grok-dsh` 会报错并提示，不会启动任何后端。
 
-Start the official host first (recommended), then open the TUI:
+**Bridge-only (the only mode since v0.5.0)**: start the official host first, then open the TUI. Without a running `dsh web`, `grok-dsh` fails with instructions instead of starting a backend.
 
 ```sh
 dsh web                # 启动官方 host / start the official host
-grok-dsh               # 打开 TUI：检测到运行中的 dsh web 则直连，否则启动本窗口独立后端
-                       # open the TUI: bridges to a running dsh web, else starts a per-window backend
-grok-dsh stop          # 停止所有独立后端 / stop all standalone backends
-grok-dsh status        # 查看 host 桥 / 独立后端状态与 grok 版本 / host bridge & backend status, grok version
-grok-dsh restart       # 重启当前窗口的独立后端 / restart this window's standalone backend
+grok-dsh               # 打开 TUI：直连运行中的 dsh web（peer of the browser tabs）
+                       # open the TUI: bridges to the running dsh web
+grok-dsh status        # 查看 host 桥状态与 grok 版本 / host bridge status, grok version
+grok-dsh setup         # 把 grok bridge 挂进 dsh web profile（幂等）/ wire the bridge (idempotent)
 ```
 
-在哪个目录运行 `grok-dsh`，会话的工作目录就在哪个目录。独立后端与 `dsh web` 不要同时运行（两者写同一会话存储）。
+在哪个目录运行 `grok-dsh`，会话的工作目录就在哪个目录。
 
-Run `grok-dsh` in the directory you want the session's working directory to be. Do not run a standalone backend while `dsh web` is up (both write the same session store).
+Run `grok-dsh` in the directory you want the session's working directory to be.
 
 ## 用量指标展示 / Usage metrics
 

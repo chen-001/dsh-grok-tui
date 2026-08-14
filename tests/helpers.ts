@@ -410,6 +410,9 @@ export async function makeGrokHarness(options: {
         socketPath: options.socketPath,
         provider: 'mock',
         model: options.model ?? 'mock',
+        // The bridge defaults to host mode (no provider registration) since
+        // v0.5.0; the standalone harness owns the slot and opts in.
+        userInteractionProvider: true,
         ...(options.lastModelFile === undefined
           ? {}
           : { lastModelFile: options.lastModelFile }),

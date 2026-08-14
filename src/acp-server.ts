@@ -95,8 +95,8 @@ function invalidParams(detail: string): RequestError {
 
 /**
  * Status-file path for the usage panel (scripts/usage-panel.mjs). Lives next
- * to the session store in the DSH home so both bridge and standalone modes
- * share one location; the panel defaults to the same path.
+ * to the session store in the DSH home so every deployment shares one
+ * location; the panel defaults to the same path.
  */
 function usageStatusFile(): string {
   const home = process.env.HOME ?? process.env.USERPROFILE ?? '/tmp'
@@ -196,20 +196,23 @@ export interface GrokServerConfig {
   webPort?: number
   /**
    * Whether to register the plugin as the context's single
-   * user-interaction provider. Defaults to true (the standalone daemon owns
-   * the slot). The OFFICIAL host must set this to false: its api-proxy owns
+   * user-interaction provider. Defaults to false — the official host (the
+   * only deployment since v0.5.0) must keep this false: its api-proxy owns
    * the slot and the provider seam rejects a second registration
    * (DUPLICATE_PROVIDER fails the whole plugin tree). Cannot be auto-detected
-   * because grok-server activates before the api-proxy registers.
+   * because grok-server activates before the api-proxy registers. Non-host
+   * compositions that own the slot opt in explicitly (true).
    */
   userInteractionProvider?: boolean
   /**
-   * Whether the proactive session-log health watch runs (default true).
-   * The OFFICIAL host sets this to false: a single process cannot produce
-   * interleaved logs, and scanning a large shared store at the 15s interval
-   * stacks concurrent passes (~118s per pass on a 355MB store) into
-   * multi-core saturation that starves the host event loop. Legacy
-   * interleaved logs are still repaired on demand by `resumeWithRepair`.
+   * Whether the proactive session-log health watch runs (default false).
+   * The official host (the only deployment since v0.5.0) keeps this off: a
+   * single process cannot produce interleaved logs, and scanning a large
+   * shared store at the 15s interval stacks concurrent passes (~118s per
+   * pass on a 355MB store) into multi-core saturation that starves the host
+   * event loop. Legacy interleaved logs are still repaired on demand by
+   * `resumeWithRepair`. Compositions that want the proactive watch opt in
+   * explicitly (true).
    */
   healthWatch?: boolean
   /**
@@ -248,8 +251,8 @@ export function createAcpAgent(
    * route-encoded id (`provider@model`) whose provider is not registered
    * here degrades to the bare model id. The shared memory file is written by
    * whichever frontend ran last — the official host's catalog (with
-   * opencode-go etc.) differs from a standalone daemon's (deepseek-official
-   * only) — so the daemon must not route to a provider it does not have.
+   * opencode-go etc.) differs from a minimal composition's — so the plugin
+   * must not route to a provider it does not have.
    * Read at use time (lastModel.current changes on every session/set_model).
    */
   const rememberedModel = (): string | undefined => {
@@ -267,8 +270,8 @@ export function createAcpAgent(
    * does. Without the preset mount, grok sessions resolve ONLY the
    * global-layer tools (view_image / visualize): the bash/fs/… surface lives
    * in the preset's standing scope, which an agent only joins through
-   * `presets.mount()` inside the creation `setup`. The standalone daemon has
-   * no roster (tools are host-global there), so this degrades to no-op.
+   * `presets.mount()` inside the creation `setup`. A composition without a
+   * roster (tools are host-global there) degrades to no-op.
    * @returns the preset id to record on the header and the setup callback.
    */
   const composeFromPreset = async (): Promise<{
@@ -815,8 +818,9 @@ export function createAcpAgent(
   // the refreshed catalog to every owned session's pager so the slash menu
   // tracks the registry (emit-mode; a failing push never vetoes the change).
   // The commands/change event name is merge-extended by dsh-commands' own
-  // module augmentation; the standalone tsc environment (two cordis copies)
-  // cannot see it, so the cast keeps this file's type surface identical to
+  // module augmentation; the standalone tsc environment (two cordis copies
+  // on this machine) cannot see it, so the cast keeps this file's type
+  // surface identical to
   // the host runtime, which always dispatches the event.
   const disposeCommandsChange = ctx.on(
     'commands/change' as Parameters<typeof ctx.on>[0],

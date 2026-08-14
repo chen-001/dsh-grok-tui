@@ -39,25 +39,17 @@
 #      idempotently adds the grok-server row to cordis.patch.yml and links
 #      the plugin into the profile's node_modules, so `dsh web` carries the
 #      grok leader socket with no extra flags. The TUI then connects to the
-#      OFFICIAL host as a peer client (recommended; see README "官方 host
-#      桥接模式"). The standalone daemon stays as a fallback.
+#      OFFICIAL host as a peer client (see README "官方 host 桥接模式").
 #
 # Afterwards, typing `grok-dsh` in any terminal opens the grok TUI backed by
-# this machine's dsh. grok-dsh AUTO-SELECTS between two usage forms:
-#   A. OFFICIAL HOST BRIDGE (recommended): `dsh web` runs with the bridge
-#      (this installer wired it into the web profile), so `grok-dsh` connects
-#      the TUI straight to the host — peer of the browser tabs, sharing one
-#      live agent per session.
-#   B. STANDALONE DAEMON (fallback): no `dsh web` running, so `grok-dsh`
-#      starts this window's own backend (auto-stopped when the TUI closes):
-#          grok-dsh           open the TUI (auto-select)
-#          grok-dsh stop      stop ALL standalone backends (the official
-#                             host is managed by `dsh web`)
-#          grok-dsh status    host bridge + backend status, grok version
-#          grok-dsh restart   stop + start this window's standalone backend
-# NEVER run a standalone daemon and the official host at once: two writers on
-# one session store resurrect the seq-gap corruption. Switch from B to A by
-# closing all grok-dsh windows (or `grok-dsh stop`) before starting `dsh web`.
+# this machine's dsh. grok-dsh is BRIDGE-ONLY (since v0.5.0): `dsh web` must
+# be running with the bridge (this installer wired it into the web profile),
+# and grok-dsh connects the TUI straight to the host — peer of the browser
+# tabs, sharing one live agent per session. Without a running host, grok-dsh
+# fails with instructions instead of starting a backend:
+#          grok-dsh           open the TUI (requires a running `dsh web`)
+#          grok-dsh status    host bridge status, grok version
+#          grok-dsh setup     wire the bridge into the web profile (idempotent)
 #
 # Re-running this installer updates the plugin (git fetch + reset to GROK_REF).
 # dsh upgrades need nothing: each grok-dsh launch links the current checkout.
@@ -94,9 +86,9 @@ Usage:
   sh install.sh --help          this message
 
 After installation, open the grok TUI with:  grok-dsh
-(grok-dsh auto-selects: connects to the running `dsh web` bridge when the
-host is up, otherwise starts a per-window standalone backend that stops
-when the TUI closes. `grok-dsh stop` stops all standalone backends.)
+(grok-dsh is bridge-only: start `dsh web` first, then run grok-dsh to
+connect the TUI to the host. Without a running host, grok-dsh fails with
+instructions instead of starting a backend.)
 
 The source build (~15-30 min, needs Rust) is prompted for during install and
 can be skipped; it is required for the dsh status bar (cache %, tokens).
@@ -349,8 +341,7 @@ fi
 # --- 5c. Build the plugin (dist/index.js is required by the host bridge) ------
 # The profile hookup (step 6b) links the plugin into the web profile's
 # node_modules; `dsh web` loads it via package.json exports → ./dist/index.js,
-# so dist must exist before the profile is written. The standalone daemon
-# (grok-dsh fallback) runs from source via tsx and doesn't need this.
+# so dist must exist before the profile is written.
 step "Building the plugin for the host bridge"
 if ! ( cd "$GROK_DIR" && DSH_PATH="$DSH_CURRENT" npm run build ); then
   die "could not build dist/index.js — make sure DSH_CURRENT ($DSH_CURRENT) points to a valid dsh checkout, then re-run."
@@ -409,9 +400,8 @@ fi
 # Wire the plugin into the web profile so `dsh web` carries the grok bridge
 # with no extra flags: the grok TUI then connects to the OFFICIAL host as a
 # peer client (browser tabs and grok windows share one live agent per
-# session — no interleaved session logs). The standalone daemon mode below
-# stays available, but note that running BOTH the official host and a
-# standalone daemon at once would resurrect the two-writer race.
+# session — no interleaved session logs). This is the ONLY deployment shape
+# since v0.5.0 (no standalone backend).
 # (scripts/install-profile.mjs is idempotent and never clobbers user rows.)
 step "Wiring the grok bridge into the dsh web profile"
 if command -v node >/dev/null 2>&1; then
@@ -439,13 +429,10 @@ fi
 
 # --- 7. done -----------------------------------------------------------------
 step "Done"
-info "dsh-grok-tui is installed. grok-dsh auto-selects between two forms:"
-info "  A. OFFICIAL HOST BRIDGE (recommended): start 'dsh web', then 'grok-dsh'"
-printf '    %sgrok-dsh %s%s\n' "$B" "$RST" "(connects to the running host's bridge socket)"
-info "  B. STANDALONE DAEMON (fallback):      grok-dsh (no dsh web needed)"
-info "  grok-dsh stop | status | restart   — manage standalone backends"
-info "Never run B while A is up (two writers on one session store = seq gaps)."
-info "Switch B -> A: close all grok-dsh windows (or 'grok-dsh stop') first."
+info "dsh-grok-tui is installed. grok-dsh is BRIDGE-ONLY:"
+info "  1. start the official host:  dsh web"
+info "  2. open the TUI:             grok-dsh"
+info "  grok-dsh status | setup   — host bridge status / profile hookup"
 info "Model/effort: DSH_GROK_MODEL=deepseek-v4-flash DSH_GROK_EFFORT=high grok-dsh"
 info "dsh upgrades need nothing — every grok-dsh launch links the current dsh."
 info "Re-run this installer only to update dsh-grok-tui itself."

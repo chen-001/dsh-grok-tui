@@ -36,7 +36,8 @@
     re-align 后推送 `available_commands_update`、`commands/change` 实时刷新、
     prompt 拦截执行、`session/cancel` 中止执行
   - `scripts/serve-real.ts`：standalone 挂载 `dsh-commands` +
-    `dsh-command-goal`（host 模式由 web profile 自带）
+    `dsh-command-goal`（host 模式由 web profile 自带；该文件在 v0.5.0
+    bridge-only 变更中已删除）
   - 测试：`tests/commands-bridge.spec.ts` 14 例；全套 136 例通过
 - **依据**: DSH `packages/interaction/commands/src/index.ts`（`CommandRuntime`
   的 `list` / `execute` 远程方法）；grok-shell
@@ -118,7 +119,8 @@
 - **状态**: 待定　**价值**: 中　**成本**: 中
 - **现状**: standalone 模式每 15s 全量 glob + stat 整个 session store；
   文档记录了 355MB store 单轮 ~118s、并发 pass 叠到 ~487% CPU 的教训
-  （host 模式因此禁用 watch，standalone 仍全量扫）。
+  （host 模式因此禁用 watch；v0.5.0 起 standalone 已移除，watch 默认关闭，
+  需要时显式 healthWatch: true）。
 - **方案**: 只扫描 mtime 变化的目录，或限制单轮处理数量。
 
 ### I5 · session/list 扫描并发限制
@@ -153,6 +155,29 @@
   纳入测试套件。
 - **方案**: 做成可选的 e2e 测试（依赖 grok-build 二进制），验证真实握手与
   流式渲染。
+
+---
+
+## 已实施的方向变更
+
+### B1 · 移除 standalone 模式，只保留桥接模式 ✅ 已实现（v0.5.0）
+
+- **状态**: 已实现（2026-08-13，分支 `feat/bridge-only`）
+- **背景**: 用户要求 grok-dsh 以后只有桥接模式——必须先启动 `dsh web`，
+  才能使用 grok-dsh。
+- **改动**:
+  - `scripts/grok-dsh.sh`：删除 standalone 全部逻辑（start_server /
+    stop_server / server_pid / check_dsh / stop / restart 命令），host
+    探测失败时报错退出并提示先启动 `dsh web`；保留 status / setup 命令
+  - `scripts/serve-real.ts`：删除（standalone 后端入口）
+  - `src/index.ts`：`userInteractionProvider` 与 `healthWatch` 默认值
+    改为 false（host 模式语义；需要时显式 opt-in）
+  - `scripts/serve.ts`、`tests/helpers.ts`、`tests/m3.spec.ts`：显式
+    opt-in 保持原行为
+  - 文档：README / ARCHITECTURE / COMPATIBILITY / install.sh /
+    grok-server.yml / probe-host-bridge.mjs / install-profile.mjs 全面
+    清理 standalone 描述
+- **验证**: 全套 136 例测试通过；build 通过
 
 ---
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * Probe whether a leader socket is the DSH grok BRIDGE (not any other
- * leader). Used by grok-dsh.sh to decide between connecting the TUI to the
- * official host and starting a standalone backend.
+ * leader). Used by grok-dsh.sh to verify the official host bridge before
+ * connecting the TUI (bridge-only since v0.5.0).
  *
  * The original grok TUI also listens on ~/.grok/leader.sock when run
  * standalone — a plain connect() check would mistake that foreign leader for

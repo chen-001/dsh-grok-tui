@@ -92,17 +92,18 @@ export function apply(ctx: Context, config: GrokServerPluginConfig): void {
 
   // One user-interaction provider per context (the seam rejects a second):
   // questions ride the owning connection's ACP ext-method channel. In the
-  // OFFICIAL HOST this registration must be SKIPPED entirely: the web's
-  // api-proxy owns the single provider slot (its browser question dialog),
-  // and whichever UI registers second fails the whole plugin tree with
-  // DUPLICATE_PROVIDER. The host is selected by config
-  // (userInteractionProvider: false in grok-server.yml) because it cannot be
-  // auto-detected: grok-server activates before the api-proxy registers, so
-  // `ctx.get('apiProxy')` is still undefined at apply time. Since phase 1,
-  // grok sessions' asks ride per-agent scoped shadow tools over the ACP
-  // x.ai/ask_user_question channel (src/bridge/shadow-ask.ts), so host-mode
-  // questions no longer depend on this provider; the registration below is
-  // kept for the standalone daemon, which owns the slot.
+  // OFFICIAL HOST (the only deployment since v0.5.0) this registration must
+  // be SKIPPED entirely: the web's api-proxy owns the single provider slot
+  // (its browser question dialog), and whichever UI registers second fails
+  // the whole plugin tree with DUPLICATE_PROVIDER. The host is selected by
+  // config (userInteractionProvider: false in grok-server.yml) because it
+  // cannot be auto-detected: grok-server activates before the api-proxy
+  // registers, so `ctx.get('apiProxy')` is still undefined at apply time.
+  // Since phase 1, grok sessions' asks ride per-agent scoped shadow tools
+  // over the ACP x.ai/ask_user_question channel (src/bridge/shadow-ask.ts),
+  // so host-mode questions no longer depend on this provider; the
+  // registration below is kept only for non-host compositions that opt in
+  // explicitly (userInteractionProvider: true).
   const userQuestions = ctx.get('userQuestions') as
     | {
       registerProvider(provider: {
@@ -110,7 +111,7 @@ export function apply(ctx: Context, config: GrokServerPluginConfig): void {
       }): () => void
     }
     | undefined
-  const registerAsProvider = config.userInteractionProvider ?? true
+  const registerAsProvider = config.userInteractionProvider ?? false
   let disposeProvider: (() => void) | undefined
   if (userQuestions !== undefined && registerAsProvider) {
     try {
@@ -131,7 +132,7 @@ export function apply(ctx: Context, config: GrokServerPluginConfig): void {
         logger.warn(
           'grok-server: user-questions provider slot is already taken by ' +
             'another UI — grok questions keep riding the scoped shadow ask ' +
-            'tools; the standalone provider registration was skipped',
+            'tools; the provider registration was skipped',
         )
       } else {
         throw error
@@ -274,21 +275,22 @@ export function apply(ctx: Context, config: GrokServerPluginConfig): void {
   // counters) must be repaired before the Web UI reads them. The watch scans
   // the shared root and repairs stable interleaved artifacts.
   //
-  // Inside the official host this watch is DISABLED by default
-  // (healthWatch: false in grok-server.yml): one process owns one seq counter
-  // per session (the coordinator rejects out-of-continuation appends and the
-  // session store is a per-id singleton), so no NEW interleaving can arise —
-  // the watch would only heal the retired two-daemon era's legacy logs.
-  // Scanning a large store costs ~1s per few MB of artifacts (zstd thread
-  // pool); a 355MB store took ~118s per pass, and with the 15s interval the
-  // unguarded timer stacked concurrent passes into ~487% CPU, starving the
-  // host event loop and freezing grok prompts. Legacy interleaved logs are
-  // still repaired ON DEMAND by resumeWithRepair when a session is opened.
-  // The standalone daemon keeps the watch on (healthWatch defaults true).
+  // Inside the official host (the only deployment since v0.5.0) this watch is
+  // DISABLED by default (healthWatch: false in grok-server.yml): one process
+  // owns one seq counter per session (the coordinator rejects
+  // out-of-continuation appends and the session store is a per-id singleton),
+  // so no NEW interleaving can arise — the watch would only heal the retired
+  // two-daemon era's legacy logs. Scanning a large store costs ~1s per few MB
+  // of artifacts (zstd thread pool); a 355MB store took ~118s per pass, and
+  // with the 15s interval the unguarded timer stacked concurrent passes into
+  // ~487% CPU, starving the host event loop and freezing grok prompts.
+  // Legacy interleaved logs are still repaired ON DEMAND by resumeWithRepair
+  // when a session is opened. Compositions that want the proactive watch opt
+  // in explicitly (healthWatch: true).
   let healthWatch: SessionHealthWatch | undefined
   if (
     config.persistenceRoot !== undefined &&
-    (config.healthWatch ?? true)
+    (config.healthWatch ?? false)
   ) {
     healthWatch = startSessionHealthWatch({
       root: config.persistenceRoot,
