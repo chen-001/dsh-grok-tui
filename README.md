@@ -40,6 +40,22 @@ This installer performs the same bridge hookup automatically, then builds and wr
 
 Both paths behave identically afterwards (command, automatic herdr sidebar config, usage panels).
 
+### 分支包 / Branch packages
+
+每个功能分支发布为独立的 npm 包，另一台设备一条命令即可安装测试该分支的构建：
+
+Every feature branch is published as its own npm package — one command installs that branch's build on another machine:
+
+```sh
+npm install -g dsh-grok-tui-bridge-only     # 例：feat/bridge-only 分支的包 / e.g. the feat/bridge-only package
+grok-dsh setup                              # 挂进 dsh web profile（每台设备一次 / once per machine）
+dsh web && grok-dsh                         # 先启动 host 再开 TUI / host first, then the TUI
+```
+
+包名规则：`dsh-grok-tui-<分支末段>`（`feat/xxx` → `dsh-grok-tui-xxx`）。发布与完整范式见 `docs/BRANCH-NPM-PUBLISH.md`。
+
+Package naming: `dsh-grok-tui-<branch-segment>` (`feat/xxx` → `dsh-grok-tui-xxx`). Publishing and the full workflow live in `docs/BRANCH-NPM-PUBLISH.md`.
+
 ## 使用 / Usage
 
 **桥接模式（唯一模式，v0.5.0 起）**：先启动官方 host，再打开 TUI。没有运行中的 `dsh web` 时 `grok-dsh` 会报错并提示，不会启动任何后端。

@@ -160,6 +160,30 @@
 
 ## 已实施的方向变更
 
+### B2 · 分支 npm 发布流程 ✅ 已实现（v0.5.0）
+
+- **状态**: 已实现（2026-08-14，分支 `feat/bridge-only`）
+- **背景**: 用户需要在另一台设备上安装并测试各分支的新功能，要求每个
+  分支一个独立 npm 包 + 一条 npm install 命令 + 固定流程。
+- **方案**:
+  - 包名规则：`dsh-grok-tui-<分支末段>`（`feat/xxx` → `dsh-grok-tui-xxx`）；
+    main 保持 `dsh-grok-tui`
+  - 版本号自动带 commit（`0.5.0-bridge-only.414a73e`），每次发布唯一、
+    可追溯，无需手动管理版本
+  - `scripts/publish-branch.sh <branch>`：校验（工作区干净/分支匹配/
+    slug 合法/npm 登录/包名占用）→ 构建 → git archive 临时打包 + 覆盖
+    dist + 改写 name/version → npm publish --access public → 输出目标
+    设备安装命令；支持 --dry-run
+  - `docs/BRANCH-NPM-PUBLISH.md`：完整范式（发布流程、目标设备安装/
+    更新/卸载、main 发布、注意事项）
+  - README 增加「分支包」章节
+- **验证**: 脚本 dry-run 走到 npm 登录检查（当前未登录，正确拦截）；
+  打包改名逻辑单独验证通过；postinstall 对目标设备无害
+- **待办**: 用户执行 `npm adduser` 登录后，实际发布现有两个分支
+  （slash-commands、bridge-only）的包
+
+---
+
 ### B1 · 移除 standalone 模式，只保留桥接模式 ✅ 已实现（v0.5.0）
 
 - **状态**: 已实现（2026-08-13，分支 `feat/bridge-only`）
