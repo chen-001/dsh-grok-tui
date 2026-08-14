@@ -78,7 +78,7 @@ function main() {
   const interval = Number(process.argv[3] ?? 500)
 
   let lastKey = ''
-  let lastSessionId = undefined
+  let lastSessionId 
   let lastErrorShown = false
 
   const readView = () => {

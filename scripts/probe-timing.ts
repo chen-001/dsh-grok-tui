@@ -2,7 +2,7 @@
 import { connect } from 'node:net'
 
 const SOCKET = process.env.GROK_LEADER_SOCKET ?? '/tmp/dsh-grok.sock'
-const t0 = Date.now()
+const _t0 = Date.now()
 const sock = connect(SOCKET)
 let buf = Buffer.alloc(0)
 let nextId = 1

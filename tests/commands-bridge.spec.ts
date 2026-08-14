@@ -49,10 +49,10 @@ function makeCommands(): MockCommands {
       { name: 'plan', description: 'collides with a pager builtin' },
     ],
     executed: [],
-    list(agent: unknown) {
+    list(_agent: unknown) {
       return this.descriptors
     },
-    async execute(agent: unknown, line: string) {
+    async execute(_agent: unknown, line: string) {
       this.executed.push(line)
       return { result: { kind: 'success' as const, text: `ran: ${line}` } }
     },
@@ -165,6 +165,7 @@ describe('DSH command bridge (F1)', () => {
     )
     expect(update).toBeDefined()
     const available = (
+      // biome-ignore lint/correctness/noUnsafeOptionalChaining: guarded by expect above
       update?.update as { availableCommands?: Array<{ name: string }> }
     ).availableCommands
     // goal survives; the colliding 'plan' builtin does not.
