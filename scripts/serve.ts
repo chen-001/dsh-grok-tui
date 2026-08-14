@@ -145,7 +145,7 @@ await ctx.plugin({
   apply: (inner: Context) => {
     inner.on(
       'session/event',
-      (session, event: { type: string; data: unknown }) => {
+      (_session, event: { type: string; data: unknown }) => {
         if (event.type === 'tool/call' || event.type === 'tool/result') {
           console.log(
             'EVENT',

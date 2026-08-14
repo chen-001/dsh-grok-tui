@@ -247,6 +247,7 @@ describe('event translation', () => {
       sessionUpdate: 'tool_call_update',
       toolCallId: 'call-1',
     })
+    // biome-ignore lint/correctness/noUnsafeOptionalChaining: guarded by expect above
     const rawOutput = (updates[0]?.update as { rawOutput: { type: string } })
       .rawOutput
     expect(rawOutput.type).toBe('Bash')

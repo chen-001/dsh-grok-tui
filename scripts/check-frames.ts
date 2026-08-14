@@ -65,4 +65,4 @@ for (const project of readdirSync(ROOT, { withFileTypes: true }).filter(d =>
   }
 }
 console.log(`\nTOTAL ${total} logs, PROBLEMS: ${problems.length}`)
-for (const p of problems) console.log('  !! ' + p)
+for (const p of problems) console.log(`  !! ${p}`)
