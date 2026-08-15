@@ -168,10 +168,24 @@
     noUnusedVariables / noImplicitAnyLet / noNonNullAssertion /
     noUnsafeOptionalChaining 等，测试断言处加 biome-ignore 注释），
     biome.json 排除 dist（生成物）并改用 `preset` 字段
+  - 排障记录（CI 首跑全红后逐项修复）：
+    ① `ERR_PNPM_OUTDATED_LOCKFILE`：仓库 lockfile 与 package.json 不一致
+    （缺 schemastery resolution、peer 未记录），CI 的 frozen-lockfile
+    直接拒绝；用 `--config.auto-install-peers=false` 重新生成 lockfile
+    并提交（peer 不记录，本地手工 symlink 不受影响），CI 的 install
+    显式传同参数匹配 lockfile settings；
+    ② `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`：lockfile settings 与 install
+    参数不一致，workflow 显式传 `--config.auto-install-peers=false`；
+    ③ jsdom 环境缺失：dsh 快照 checkout 在工作目录内，rstest 的 include
+    模式 `**/*.{test,spec}.ts` 扫到 dsh 的 692 个 spec 文件（部分带
+    `@vitest-environment jsdom` 注释）→ 改用 git clone 到
+    `$RUNNER_TEMP/dsh`（工作区外，actions/checkout 拒绝工作区外路径）；
+    ④ m4.spec.ts 的 300ms 固定等待 flaky（JSONL 异步落盘，慢 runner 上
+    session/list 偶发读不到）→ 改为 pollForSession 轮询（25ms×200）
   - 验证：本地完整模拟 CI 环境（干净 clone + registry 依赖 + 固定 dsh
     commit）151 例测试全绿、lint 全绿、build 通过；各分支基线测试
     main 122 / slash-commands 136 / bridge-only 136 / session-title 139
-    全部通过
+    全部通过；GitHub Actions 实测 6 个分支全部 success
 - **依据**: 本地开发环境依赖解析机制（tsconfig paths + node_modules
   链接）；deepseek-harness 公开仓库（`@deepseek-ai/dsh-root`）与 npm
   registry 上的 vendored 包（`@deepseek-ai/cordis` 等）。
