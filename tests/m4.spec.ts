@@ -32,6 +32,27 @@ afterEach(async () => {
   await rm(socketPath, { force: true }).catch(() => {})
 })
 
+/**
+ * Wait until the session catalog contains the given session id. The JSONL
+ * coordinator drains asynchronously; a fixed sleep is flaky on slow/loaded
+ * runners, so poll instead (25ms x 200 = 5s budget).
+ */
+async function pollForSession(
+  client: AcpTestClient,
+  cwd: string,
+  sessionId: string,
+): Promise<void> {
+  for (let i = 0; i < 200; i++) {
+    const response = (await client.client.extMethod('x.ai/session/list', {
+      cwd,
+      limit: 30,
+    })) as { sessions?: Array<{ sessionId: string }> }
+    if (response.sessions?.some(row => row.sessionId === sessionId)) return
+    await new Promise(resolve => setTimeout(resolve, 25))
+  }
+  throw new Error(`session ${sessionId} did not materialize in the catalog`)
+}
+
 function replayEvent<T extends SessionEvent['type']>(
   type: T,
   data: Extract<SessionEvent, { type: T }>['data'],
@@ -494,7 +515,7 @@ describe('x.ai/session/list (resume picker)', () => {
       prompt: [{ type: 'text', text: 'list me something' }],
     })
     // The JSONL coordinator drains asynchronously; settle before listing.
-    await new Promise(resolve => setTimeout(resolve, 300))
+    await pollForSession(client, dir, sessionId)
 
     const response = (await client.client.extMethod('x.ai/session/list', {
       cwd: dir,
@@ -578,7 +599,7 @@ describe('x.ai/session/list (resume picker)', () => {
       sessionId: archivedId,
       prompt: [{ type: 'text', text: 'archive me' }],
     })
-    await new Promise(resolve => setTimeout(resolve, 300))
+    await pollForSession(client, dir, keptId)
 
     // The web host's workspace registry wrote this unit; archive one session.
     await writeFile(
