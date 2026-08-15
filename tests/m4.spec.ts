@@ -33,24 +33,29 @@ afterEach(async () => {
 })
 
 /**
- * Wait until the session catalog contains the given session id. The JSONL
- * coordinator drains asynchronously; a fixed sleep is flaky on slow/loaded
- * runners, so poll instead (25ms × 200 ≈ 5s budget).
+ * Wait until the session catalog contains the given session id(s). The JSONL
+ * coordinator drains asynchronously and not strictly in creation order, so a
+ * fixed sleep is flaky on slow/loaded runners; poll instead (25ms × 200 ≈ 5s
+ * budget). Pass an array to wait for every session of a batch.
  */
 async function pollForSession(
   client: AcpTestClient,
   cwd: string,
-  sessionId: string,
+  sessionId: string | string[],
 ): Promise<void> {
-  for (let i = 0; i < 200; i++) {
+  const missing = new Set(Array.isArray(sessionId) ? sessionId : [sessionId])
+  for (let i = 0; i < 200 && missing.size > 0; i++) {
     const response = (await client.client.extMethod('x.ai/session/list', {
       cwd,
       limit: 30,
     })) as { sessions?: Array<{ sessionId: string }> }
-    if (response.sessions?.some(row => row.sessionId === sessionId)) return
+    for (const row of response.sessions ?? []) missing.delete(row.sessionId)
+    if (missing.size === 0) return
     await new Promise(resolve => setTimeout(resolve, 25))
   }
-  throw new Error(`session ${sessionId} did not materialize in the catalog`)
+  throw new Error(
+    `sessions did not materialize in the catalog: ${[...missing].join(', ')}`,
+  )
 }
 
 function replayEvent<T extends SessionEvent['type']>(
@@ -674,7 +679,7 @@ describe('x.ai/session/list pagination and search', () => {
       })
     }
     // The JSONL coordinator drains asynchronously; settle before listing.
-    await pollForSession(client, '/tmp', sessionIds.at(-1) ?? '')
+    await pollForSession(client, '/tmp', sessionIds)
     return { client, sessionIds }
   }
 
